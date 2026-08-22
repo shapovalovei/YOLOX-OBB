@@ -1,5 +1,37 @@
 # YOLOX-OBB
 YOLOX in DOTA with KLD loss. (Oriented Object Detection)（Rotated BBox）基于YOLOX的旋转目标检测
+
+> **Maintained fork of [buzhidaoshenme/YOLOX-OBB](https://github.com/buzhidaoshenme/YOLOX-OBB).**
+
+This fork preserves the original project, license, history, and attribution.
+It is maintained independently and contains additional regression-tested fixes.
+It is not the official YOLOX-OBB project.
+
+## Fixes in this maintained fork
+
+### Correct OBB geometry through augmentation
+
+The original `random_perspective`/Mosaic path treated encoded OBB center and
+dimension fields as HBB corner coordinates. After image transforms this could
+leave the rotated-box geometry inconsistent, including a stale angle. The fork
+decodes the OBB into image-space corners, applies the same affine or
+perspective transform as the image, clips the transformed geometry, and
+reconstructs a canonical OBB. Mosaic no longer clips encoded dimensions as if
+they were an axis-aligned rectangle.
+
+### Correct KLD prediction/target order
+
+The KLD training-head call now passes the prediction tensor first and the
+target tensor second, matching the semantics of the KLD implementation and its
+gradient direction.
+
+Both fixes have repository-local regression coverage. From the repository root,
+run:
+
+```shell
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
 ## Installation 
 1. Install YOLOX-OBB(You can refer to the installation of [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX))
 ```shell
