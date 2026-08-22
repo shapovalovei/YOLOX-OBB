@@ -444,8 +444,11 @@ class YOLOXHeadOBB_KLD(nn.Module):
             l1_targets = torch.cat(l1_targets, 0)
 
         num_fg = max(num_fg, 1)
+        # KLDloss implements D_KL(prediction || target): its first argument
+        # supplies the prediction covariance/numerator and its second
+        # argument supplies the target reference frame.
         loss_iou = (
-            self.iou_loss(reg_targets_with_angle, bbox_preds_with_angle.view(-1, 5)[fg_masks])
+            self.iou_loss(bbox_preds_with_angle.view(-1, 5)[fg_masks], reg_targets_with_angle)
         ).sum() / num_fg
         loss_obj = (
             self.bcewithlog_loss(obj_preds.view(-1, 1), obj_targets)
