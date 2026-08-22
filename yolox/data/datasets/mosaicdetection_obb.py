@@ -120,10 +120,10 @@ class MosaicDetectionOBB(Dataset):
 
             if len(mosaic_labels):
                 mosaic_labels = np.concatenate(mosaic_labels, 0)
-                np.clip(mosaic_labels[:, 0], 0, 2 * input_w, out=mosaic_labels[:, 0])
-                np.clip(mosaic_labels[:, 1], 0, 2 * input_h, out=mosaic_labels[:, 1])
-                np.clip(mosaic_labels[:, 2], 0, 2 * input_w, out=mosaic_labels[:, 2])
-                np.clip(mosaic_labels[:, 3], 0, 2 * input_h, out=mosaic_labels[:, 3])
+                # These values encode center +/- long/short dimensions, not
+                # an axis-aligned image rectangle. Clipping them here
+                # corrupts OBB geometry at mosaic edges; random_perspective
+                # clips after transforming the actual corners.
 
             #旋转框degrees=0,perspective=0
             mosaic_img, mosaic_labels = random_perspective(

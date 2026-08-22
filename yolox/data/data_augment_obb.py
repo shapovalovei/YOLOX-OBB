@@ -49,6 +49,76 @@ def box_candidates(box1, box2, wh_thr=2, ar_thr=20, area_thr=0.2):
     )  # candidates
 
 
+def obb_to_corners(center_x, center_y, width, height, angle):
+    """Decode the fork's (cx, cy, long_w, short_h, angle_deg) contract."""
+    radians = math.radians(float(angle))
+    ux, uy = math.cos(radians), math.sin(radians)
+    vx, vy = -uy, ux
+    half_width, half_height = float(width) / 2.0, float(height) / 2.0
+    return np.asarray(
+        [
+            (center_x - half_width * ux - half_height * vx,
+             center_y - half_width * uy - half_height * vy),
+            (center_x + half_width * ux - half_height * vx,
+             center_y + half_width * uy - half_height * vy),
+            (center_x + half_width * ux + half_height * vx,
+             center_y + half_width * uy + half_height * vy),
+            (center_x - half_width * ux + half_height * vx,
+             center_y - half_width * uy + half_height * vy),
+        ],
+        dtype=np.float64,
+    )
+
+
+def corners_to_obb(corners):
+    """Fit the canonical fork OBB to a transformed quadrilateral."""
+    points = np.asarray(corners, dtype=np.float32).reshape(-1, 2)
+    if points.shape[0] < 4 or not np.isfinite(points).all():
+        raise ValueError("OBB corners are not finite")
+    rect = cv2.minAreaRect(points)
+    rectangle = cv2.boxPoints(rect).astype(np.float64)
+    edges = np.roll(rectangle, -1, axis=0) - rectangle
+    lengths = np.linalg.norm(edges, axis=1)
+    long_index = int(np.argmax(lengths))
+    long_edge = float(lengths[long_index])
+    short_edge = float(
+        (lengths[(long_index - 1) % 4] + lengths[(long_index + 1) % 4]) / 2.0
+    )
+    if not np.isfinite([long_edge, short_edge]).all() or min(long_edge, short_edge) <= 1e-6:
+        raise ValueError("OBB corners are degenerate")
+    direction = edges[long_index]
+    angle = math.degrees(math.atan2(float(direction[1]), float(direction[0])))
+    while angle >= 90.0:
+        angle -= 180.0
+    while angle < -90.0:
+        angle += 180.0
+    center_x, center_y = rectangle.mean(axis=0)
+    return np.asarray([center_x, center_y, long_edge, short_edge, angle], dtype=np.float64)
+
+
+def _obb_target_to_corners(target):
+    center_x = (target[0] + target[2]) * 0.5
+    center_y = (target[1] + target[3]) * 0.5
+    width = target[2] - target[0]
+    height = target[3] - target[1]
+    return obb_to_corners(center_x, center_y, width, height, target[4])
+
+
+def _obb_to_target(obb, class_value):
+    center_x, center_y, width, height, angle = obb
+    return np.asarray(
+        [
+            center_x - width * 0.5,
+            center_y - height * 0.5,
+            center_x + width * 0.5,
+            center_y + height * 0.5,
+            angle,
+            class_value,
+        ],
+        dtype=np.float64,
+    )
+
+
 def random_perspective(
     img,
     targets=(),
@@ -109,33 +179,67 @@ def random_perspective(
                 img, M[:2], dsize=(width, height), borderValue=(114, 114, 114)
             )
 
-    # Transform label coordinates
+    # Transform label coordinates. The first four target values encode the
+    # center and long/short dimensions that TrainTransformOBB later converts
+    # with xyxy2cxcywh; they are not axis-aligned polygon corners.
     n = len(targets)
     if n:
-        # warp points
-        xy = np.ones((n * 4, 3))
-        xy[:, :2] = targets[:, [0, 1, 2, 3, 0, 3, 2, 1]].reshape(
-            n * 4, 2
-        )  # x1y1, x2y2, x1y2, x2y1
+        source_corners = np.asarray(
+            [_obb_target_to_corners(target) for target in targets], dtype=np.float64
+        )
+        xy = np.ones((n * 4, 3), dtype=np.float64)
+        xy[:, :2] = source_corners.reshape(n * 4, 2)
+        # Apply the exact image transform to the OBB corners.
         xy = xy @ M.T  # transform
         if perspective:
-            xy = (xy[:, :2] / xy[:, 2:3]).reshape(n, 8)  # rescale
+            homogeneous_w = xy[:, 2].reshape(n, 4)
+            valid_w = (
+                np.isfinite(homogeneous_w).all(axis=1)
+                & (np.abs(homogeneous_w) > 1e-8).all(axis=1)
+                & (
+                    (homogeneous_w > 1e-8).all(axis=1)
+                    | (homogeneous_w < -1e-8).all(axis=1)
+                )
+            )
+            xy = (xy[:, :2] / xy[:, 2:3]).reshape(n, 4, 2)  # rescale
         else:  # affine
-            xy = xy[:, :2].reshape(n, 8)
+            valid_w = np.isfinite(xy).all(axis=1).reshape(n, 4).all(axis=1)
+            xy = xy[:, :2].reshape(n, 4, 2)
 
-        # create new boxes
-        x = xy[:, [0, 2, 4, 6]]
-        y = xy[:, [1, 3, 5, 7]]
-        xy = np.concatenate((x.min(1), y.min(1), x.max(1), y.max(1))).reshape(4, n).T
+        # Retain HBB candidate filtering, but reconstruct the final OBB from
+        # the transformed polygon rather than retaining the source angle.
+        xy_hbb = np.concatenate(
+            (
+                xy[:, :, 0].min(1),
+                xy[:, :, 1].min(1),
+                xy[:, :, 0].max(1),
+                xy[:, :, 1].max(1),
+            )
+        ).reshape(4, n).T
 
-        # clip boxes
-        xy[:, [0, 2]] = xy[:, [0, 2]].clip(0, width)
-        xy[:, [1, 3]] = xy[:, [1, 3]].clip(0, height)
+        # Clip the polygon used for reconstruction consistently with the
+        # existing augmentation's clipped candidate-box behavior.
+        clipped_xy = xy.copy()
+        clipped_xy[:, :, 0] = clipped_xy[:, :, 0].clip(0, width)
+        clipped_xy[:, :, 1] = clipped_xy[:, :, 1].clip(0, height)
+        xy_hbb[:, [0, 2]] = xy_hbb[:, [0, 2]].clip(0, width)
+        xy_hbb[:, [1, 3]] = xy_hbb[:, [1, 3]].clip(0, height)
 
         # filter candidates
-        i = box_candidates(box1=targets[:, :4].T * s, box2=xy.T)
-        targets = targets[i]
-        targets[:, :4] = xy[i]
+        keep = valid_w & box_candidates(box1=targets[:, :4].T * s, box2=xy_hbb.T)
+        updated_targets = []
+        for index in np.flatnonzero(keep):
+            try:
+                obb = corners_to_obb(clipped_xy[index])
+            except ValueError:
+                continue
+            if not np.isfinite(obb).all() or min(obb[2], obb[3]) <= 1e-6:
+                continue
+            updated_targets.append(_obb_to_target(obb, targets[index, 5]))
+        if updated_targets:
+            targets = np.asarray(updated_targets, dtype=targets.dtype)
+        else:
+            targets = np.empty((0, targets.shape[1]), dtype=targets.dtype)
 
     return img, targets
 
