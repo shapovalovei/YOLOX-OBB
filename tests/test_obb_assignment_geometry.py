@@ -56,6 +56,37 @@ def load_head():
 
 
 class OBBAssignmentGeometryTests(unittest.TestCase):
+    def test_empty_targets_have_finite_loss_and_objectness_gradient(self):
+        head_class = load_head()
+        head = head_class.__new__(head_class)
+        torch.nn.Module.__init__(head)
+        head.use_l1 = False
+        head.num_classes = 1
+        head.iou_loss = lambda pred, target: pred.sum(dim=1) * 0.0
+        head.bcewithlog_loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+
+        outputs = torch.randn(2, 3, 7, requires_grad=True)
+        labels = torch.zeros(2, 4, 6)
+        x_shifts = [torch.zeros(1, 3)]
+        y_shifts = [torch.zeros(1, 3)]
+        expanded_strides = [torch.full((1, 3), 8.0)]
+
+        losses = head.get_losses(
+            None,
+            x_shifts,
+            y_shifts,
+            expanded_strides,
+            labels,
+            outputs,
+            [],
+            outputs.dtype,
+        )
+        losses[0].backward()
+
+        self.assertTrue(torch.isfinite(losses[0]))
+        self.assertTrue(torch.isfinite(outputs.grad).all())
+        self.assertGreater(float(outputs.grad[:, :, 5].abs().sum()), 0.0)
+
     def test_short_side_rejects_anchor_outside_rotated_card_strip(self):
         """A point in the center-radius square can still miss a thin OBB."""
         head_class = load_head()
