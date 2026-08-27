@@ -56,6 +56,24 @@ def load_head():
 
 
 class OBBAssignmentGeometryTests(unittest.TestCase):
+    def test_decode_outputs_preserves_batch_and_stride_layout(self):
+        head_class = load_head()
+        head = head_class.__new__(head_class)
+        head.hw = [(1, 1), (1, 1)]
+        head.strides = [8, 16]
+        outputs = torch.zeros(2, 2, 7)
+        outputs[:, :, 0] = 0.25
+        outputs[:, :, 1] = -0.25
+
+        decoded = head.decode_outputs(outputs.clone(), torch.float32)
+
+        self.assertEqual(tuple(decoded.shape), (2, 2, 7))
+        self.assertTrue(torch.equal(decoded[0], decoded[1]))
+        self.assertTrue(torch.allclose(decoded[0, :, :4], torch.tensor([
+            [2.0, -2.0, 8.0, 8.0],
+            [4.0, -4.0, 16.0, 16.0],
+        ])))
+
     def test_empty_targets_have_finite_loss_and_objectness_gradient(self):
         head_class = load_head()
         head = head_class.__new__(head_class)
