@@ -196,6 +196,8 @@ class MosaicDetectionOBB(Dataset):
         cp_scale_ratio *= jit_factor
         if FLIP:
             cp_img = cp_img[:, ::-1, :]
+            cp_labels = cp_labels.copy()
+            cp_labels[:, 4] = -cp_labels[:, 4]
 
         origin_h, origin_w = cp_img.shape[:2]
         target_h, target_w = origin_img.shape[:2]
@@ -230,7 +232,7 @@ class MosaicDetectionOBB(Dataset):
         keep_list = box_candidates(cp_bboxes_origin_np.T, cp_bboxes_transformed_np.T, 5)
 
         if keep_list.sum() >= 1.0:
-            cls_labels = cp_labels[keep_list, 4:5].copy()
+            cls_labels = cp_labels[keep_list, 4:6].copy()
             box_labels = cp_bboxes_transformed_np[keep_list]
             labels = np.hstack((box_labels, cls_labels))
             origin_labels = np.vstack((origin_labels, labels))
