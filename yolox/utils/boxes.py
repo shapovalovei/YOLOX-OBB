@@ -53,7 +53,7 @@ def postprocess(prediction, num_classes, conf_thre=0.7, nms_thre=0.45): #[batch,
         # Get score and class with highest confidence
         class_conf, class_pred = torch.max(image_pred[:, 5: 5 + num_classes], 1, keepdim=True) #[n_anchors_all, 1]
 
-        conf_mask = (image_pred[:, 4] * class_conf.squeeze() >= conf_thre).squeeze()
+        conf_mask = image_pred[:, 4] * class_conf.squeeze(1) >= conf_thre
         # Detections ordered as (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
         detections = torch.cat((image_pred[:, :5], class_conf, class_pred.float()), 1)
         detections = detections[conf_mask]
@@ -96,7 +96,7 @@ def postprocessobb(prediction, num_classes, conf_thre=0.7, nms_thre=0.45): # [ba
         #print(angle_pred)
 
 
-        conf_mask = (image_pred[:, 4] * class_conf.squeeze() >= conf_thre).squeeze()
+        conf_mask = image_pred[:, 4] * class_conf.squeeze(1) >= conf_thre
         # Detections ordered as (x, y, w, h, angle_pred, class_conf, class_pred, obj_conf)
         detections = torch.cat((image_pred[:, :4], angle_pred.float(), class_conf, class_pred.float(), image_pred[:, 4].unsqueeze(1)), 1)
         detections = detections[conf_mask]
@@ -159,7 +159,7 @@ def postprocessobb_kld(prediction, num_classes, conf_thre=0.7, nms_thre=0.45): #
             continue
         # Get score and class with highest confidence
         class_conf, class_pred = torch.max(image_pred[:, 6: 6 + num_classes], 1, keepdim=True) # [n_anchors_all, 1]
-        conf_mask = (image_pred[:, 5] * class_conf.squeeze() >= conf_thre).squeeze()
+        conf_mask = image_pred[:, 5] * class_conf.squeeze(1) >= conf_thre
         detections = torch.cat((image_pred[:, :5], class_conf, class_pred.float(), image_pred[:, 5].unsqueeze(1)), dim=1)
         detections = detections[conf_mask]
         if not detections.size(0):
