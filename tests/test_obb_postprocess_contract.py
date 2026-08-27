@@ -77,5 +77,28 @@ class OBBPostprocessContractTests(unittest.TestCase):
         self.assertIsNotNone(output[0])
         self.assertEqual(tuple(output[0].shape), (1, 10))
 
+    def test_kld_postprocess_offsets_polygon_coordinates_per_class(self):
+        observed = []
+
+        def capture_nms(dets, threshold):
+            observed.append(dets.copy())
+            return list(range(len(dets)))
+
+        self.boxes.py_cpu_nms_poly = capture_nms
+        prediction = torch.tensor(
+            [[
+                [100.0, 100.0, 40.0, 10.0, 25.0, 0.99, 0.99, 0.001],
+                [100.0, 100.0, 40.0, 10.0, 25.0, 0.99, 0.001, 0.99],
+            ]]
+        )
+        output = self.boxes.postprocessobb_kld(
+            prediction, num_classes=2, conf_thre=0.01, nms_thre=0.65
+        )
+
+        self.assertIsNotNone(output[0])
+        self.assertEqual(tuple(output[0].shape), (2, 10))
+        self.assertEqual(sorted(output[0][:, 9].tolist()), [0.0, 1.0])
+        self.assertEqual(float(observed[0][0, 0] - observed[0][1, 0]), 4000.0)
+
 if __name__ == "__main__":
     unittest.main()
