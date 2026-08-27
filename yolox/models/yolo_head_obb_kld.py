@@ -520,6 +520,7 @@ class YOLOXHeadOBB_KLD(nn.Module):
 
         fg_mask, is_in_boxes_and_center = self.get_in_boxes_info(
             gt_bboxes_per_image,
+            gt_angles_per_image,
             expanded_strides,
             x_shifts,
             y_shifts,
@@ -608,6 +609,7 @@ class YOLOXHeadOBB_KLD(nn.Module):
     def get_in_boxes_info(
         self,
         gt_bboxes_per_image, # shape（num_gt, 4）
+        gt_angles_per_image, # shape（num_gt）, degrees
         expanded_strides, # shape（1, n_anchors_all）
         x_shifts, # shape（1, n_anchors_all）
         y_shifts, # shape（1, n_anchors_all）
@@ -628,36 +630,25 @@ class YOLOXHeadOBB_KLD(nn.Module):
             .repeat(num_gt, 1)
         )
 
-        gt_ws_per_image = gt_bboxes_per_image[:, 2] #add
-        gt_hs_per_image = gt_bboxes_per_image[:, 3] #add
-        max_hs_ws = torch.where(gt_ws_per_image>=gt_hs_per_image, gt_ws_per_image, gt_hs_per_image)
+        # Evaluate the anchor center in the target OBB frame.  The head and
+        # KLD loss use degrees and the same inverse rotation below:
+        #   local_x = dx*cos(theta) + dy*sin(theta)
+        #   local_y = -dx*sin(theta) + dy*cos(theta)
+        gt_angles = gt_angles_per_image.unsqueeze(1) * math.pi / 180.0
+        cos_angles = torch.cos(gt_angles)
+        sin_angles = torch.sin(gt_angles)
+        delta_x = x_centers_per_image - gt_bboxes_per_image[:, 0].unsqueeze(1)
+        delta_y = y_centers_per_image - gt_bboxes_per_image[:, 1].unsqueeze(1)
+        local_x = delta_x * cos_angles + delta_y * sin_angles
+        local_y = -delta_x * sin_angles + delta_y * cos_angles
+        half_w = gt_bboxes_per_image[:, 2].unsqueeze(1) * 0.5
+        half_h = gt_bboxes_per_image[:, 3].unsqueeze(1) * 0.5
 
-        gt_bboxes_per_image_l = (
-            (gt_bboxes_per_image[:, 0] - 0.5 * max_hs_ws[:])
-            .unsqueeze(1)
-            .repeat(1, total_num_anchors) # [n_gt] -> [n_gt, n_anchor] 应该是
-        )
-        gt_bboxes_per_image_r = (
-            (gt_bboxes_per_image[:, 0] + 0.5 * max_hs_ws[:])
-            .unsqueeze(1)
-            .repeat(1, total_num_anchors)
-        )
-        gt_bboxes_per_image_t = (
-            (gt_bboxes_per_image[:, 1] - 0.5 * max_hs_ws[:])
-            .unsqueeze(1)
-            .repeat(1, total_num_anchors)
-        )
-        gt_bboxes_per_image_b = (
-            (gt_bboxes_per_image[:, 1] + 0.5 * max_hs_ws[:])
-            .unsqueeze(1)
-            .repeat(1, total_num_anchors)
-        )
-
-        b_l = x_centers_per_image - gt_bboxes_per_image_l
-        b_r = gt_bboxes_per_image_r - x_centers_per_image
-        b_t = y_centers_per_image - gt_bboxes_per_image_t
-        b_b = gt_bboxes_per_image_b - y_centers_per_image
-        bbox_deltas = torch.stack([b_l, b_t, b_r, b_b], 2) # shape （n_gt, n_anchor, 4）
+        bbox_deltas = torch.stack(
+            [local_x + half_w, local_y + half_h,
+             half_w - local_x, half_h - local_y],
+            2,
+        ) # shape (n_gt, n_anchor, 4)
 
         is_in_boxes = bbox_deltas.min(dim=-1).values > 0.0 # shape (n_gt, n_anchor)
         is_in_boxes_all = is_in_boxes.sum(dim=0) > 0 # shape (n_anchor) 中心点位于标注框内的锚框为True
