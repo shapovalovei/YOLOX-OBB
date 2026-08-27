@@ -115,9 +115,7 @@ def postprocessobb(prediction, num_classes, conf_thre=0.7, nms_thre=0.45): # [ba
                 detections[j][4] = detections[j][4] + 90.0
             if detections[j][4] == -90.0:
                 detections[j][4] = 90.0
-            rect = ((detections[j][0], detections[j][1]), (detections[j][3], detections[j][2]), detections[j][4])
-
-            #rect = ((detections[j][0], detections[j][1]), (detections[j][2], detections[j][3]), detections[j][4])
+            rect = ((detections[j][0], detections[j][1]), (detections[j][2], detections[j][3]), detections[j][4])
             box = cv2.boxPoints(rect) # (x1,y1,x2,y2,x3,y3,x4,y4)
             box = np.intp(box)
             box = box.reshape(-1)
