@@ -400,7 +400,7 @@ class YOLOXHeadOBB_KLD(nn.Module):
                         obj_preds,
                         labels,
                         imgs,
-                        "gpu",
+                        "cpu",
                     )
 
                 torch.cuda.empty_cache()
