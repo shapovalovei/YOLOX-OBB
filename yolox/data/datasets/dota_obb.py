@@ -8,13 +8,10 @@
 
 import os
 import os.path
-import pickle
 import xml.etree.ElementTree as ET
 
 import cv2
 import numpy as np
-
-from yolox.evaluators.voc_eval import voc_eval
 
 from .datasets_wrapper import Dataset
 from .dota_classes import VOC_CLASSES
@@ -22,12 +19,13 @@ from .dota_classes import VOC_CLASSES
 
 class AnnotationTransform(object):
 
-    """Transforms a VOC annotation into a Tensor of bbox coords and label index
+    """Transforms a DOTA-converted annotation into OBB coordinates and labels.
+
     Initilized with a dictionary lookup of classnames to indexes
 
     Arguments:
         class_to_ind (dict, optional): dictionary lookup of classnames -> indexes
-            (default: alphabetic indexing of VOC's 20 classes)
+            (default: indexing of the DOTA classes)
         keep_difficult (bool, optional): keep difficult instances or not
             (default: False)
         height (int): height
@@ -74,12 +72,12 @@ class AnnotationTransform(object):
 class DOTAOBBDetection(Dataset):
 
     """
-    VOC Detection Dataset Object
+    DOTA oriented bounding-box detection dataset.
 
     input is image, target is annotation
 
     Args:
-        root (string): filepath to VOCdevkit folder.
+        root (string): filepath to the DOTA-converted dataset root.
         image_set (string): imageset to use (eg. 'train', 'val', 'test')
         transform (callable, optional): transformation to perform on the
             input image
@@ -178,28 +176,21 @@ class DOTAOBBDetection(Dataset):
 
     def evaluate_detections(self, all_boxes, output_dir=None):
         """
-        all_boxes is a list of length number-of-classes.
-        Each list element is a list of length number-of-images.
-        Each of those list elements is either an empty list []
-        or a numpy array of detection.
+        Write polygon detections for the external DOTA evaluation workflow.
 
-        all_boxes[class][image] = [] or np.array of shape #dets x 5
+        ``all_boxes[class][image]`` is either an empty list or a NumPy array
+        with shape ``[number_of_detections, 9]`` containing eight polygon
+        coordinates followed by the confidence score.
+
+        Internal AP is intentionally not computed here. ``output_dir`` is
+        retained for compatibility; result files continue to use the
+        dataset-local result directory documented by the DOTA workflow.
+
+        Returns:
+            tuple: ``(None, None)`` because canonical DOTA AP is external.
         """
         self._write_voc_results_file(all_boxes)
-
-        return 0.0, 0.0 #add
-
-        IouTh = np.linspace(0.5, 0.95, int(np.round((0.95 - 0.5) / 0.05)) + 1, endpoint=True)
-        mAPs = []
-        for iou in IouTh:
-            mAP = self._do_python_eval(output_dir, iou)
-            mAPs.append(mAP)
-
-        print("--------------------------------------------------------------")
-        print("map_5095:", np.mean(mAPs))
-        print("map_50:", mAPs[0])
-        print("--------------------------------------------------------------")
-        return np.mean(mAPs), mAPs[0]
+        return None, None
 
     def _get_voc_results_file_template(self):
         filename ="{:s}.txt"
@@ -214,13 +205,13 @@ class DOTAOBBDetection(Dataset):
             cls_ind = cls_ind
             if cls == "__background__":
                 continue
-            print("Writing {} VOC results file".format(cls))
+            print("Writing {} DOTA results file".format(cls))
             filename = self._get_voc_results_file_template().format(cls)
             with open(filename, "wt") as f:
                 for im_ind, index in enumerate(self.ids):
                     index = index[1]
                     dets = all_boxes[cls_ind][im_ind] # [x1, y1, x2, y2, x3, y3, x4, y4, score]
-                    if dets == []:
+                    if dets is None or len(dets) == 0:
                         continue
                     for k in range(dets.shape[0]):
                         f.write(
@@ -237,58 +228,3 @@ class DOTAOBBDetection(Dataset):
                                 dets[k, 7] + 1,
                             )
                         )
-
-    def _do_python_eval(self, output_dir="output", iou=0.5):
-        rootpath = os.path.join(self.root, "VOC" + self._year)
-        name = self.image_set[0][1]
-        annopath = os.path.join(rootpath, "Annotations", "{:s}.xml")
-        imagesetfile = os.path.join(rootpath, "ImageSets", "Main", name + ".txt")
-        cachedir = os.path.join(
-            self.root, "annotations_cache", "VOC" + self._year, name
-        )
-        if not os.path.exists(cachedir):
-            os.makedirs(cachedir)
-        aps = []
-        # The PASCAL VOC metric changed in 2010
-        use_07_metric = True if int(self._year) < 2010 else False
-        print("Eval IoU : {:.2f}".format(iou))
-        if output_dir is not None and not os.path.isdir(output_dir):
-            os.mkdir(output_dir)
-        for i, cls in enumerate(VOC_CLASSES):
-
-            if cls == "__background__":
-                continue
-
-            filename = self._get_voc_results_file_template().format(cls)
-            rec, prec, ap = voc_eval(
-                filename,
-                annopath,
-                imagesetfile,
-                cls,
-                cachedir,
-                ovthresh=iou,
-                use_07_metric=use_07_metric,
-            )
-            aps += [ap]
-            if iou == 0.5:
-                print("AP for {} = {:.4f}".format(cls, ap))
-            if output_dir is not None:
-                with open(os.path.join(output_dir, cls + "_pr.pkl"), "wb") as f:
-                    pickle.dump({"rec": rec, "prec": prec, "ap": ap}, f)
-        if iou == 0.5:
-            print("Mean AP = {:.4f}".format(np.mean(aps)))
-            print("~~~~~~~~")
-            print("Results:")
-            for ap in aps:
-                print("{:.3f}".format(ap))
-            print("{:.3f}".format(np.mean(aps)))
-            print("~~~~~~~~")
-            print("")
-            print("--------------------------------------------------------------")
-            print("Results computed with the **unofficial** Python eval code.")
-            print("Results should be very close to the official MATLAB eval code.")
-            print("Recompute with `./tools/reval.py --matlab ...` for your paper.")
-            print("-- Thanks, The Management")
-            print("--------------------------------------------------------------")
-
-        return np.mean(aps)

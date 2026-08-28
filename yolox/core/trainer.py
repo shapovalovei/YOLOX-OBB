@@ -57,6 +57,7 @@ class Trainer:
         self.data_type = torch.float16 if args.fp16 else torch.float32
         self.input_size = exp.input_size
         self.best_ap = 0
+        self.best_ap_available = False
 
         # metric record
         self.meter = MeterBuffer(window_size=exp.print_interval)
@@ -215,9 +216,17 @@ class Trainer:
         logger.info("\n{}".format(model))
 
     def after_train(self):
-        logger.info(
-            "Training of experiment is done and the best AP is {:.2f}".format(self.best_ap * 100)
-        )
+        if self.best_ap_available:
+            logger.info(
+                "Training of experiment is done and the best AP is {:.2f}".format(
+                    self.best_ap * 100
+                )
+            )
+        else:
+            logger.info(
+                "Training of experiment is done; internal AP was not computed. "
+                "Run the external DOTA evaluation workflow."
+            )
 
     def before_epoch(self):
         logger.info("---> start train epoch{}".format(self.epoch + 1))
@@ -343,14 +352,24 @@ class Trainer:
             evalmodel, self.evaluator, self.is_distributed
         )
         self.model.train()
+        has_metrics = ap50_95 is not None and ap50 is not None
         if self.rank == 0:
-            self.tblogger.add_scalar("val/COCOAP50", ap50, self.epoch + 1)
-            self.tblogger.add_scalar("val/COCOAP50_95", ap50_95, self.epoch + 1)
+            if has_metrics:
+                self.tblogger.add_scalar("val/COCOAP50", ap50, self.epoch + 1)
+                self.tblogger.add_scalar("val/COCOAP50_95", ap50_95, self.epoch + 1)
+            else:
+                logger.info(
+                    "Internal AP was not computed; DOTA result files require "
+                    "external evaluation."
+                )
             logger.info("\n" + summary)
         synchronize()
 
-        self.save_ckpt("last_epoch", ap50_95 > self.best_ap)
-        self.best_ap = max(self.best_ap, ap50_95)
+        update_best_ckpt = has_metrics and ap50_95 > self.best_ap
+        self.save_ckpt("last_epoch", update_best_ckpt)
+        if has_metrics:
+            self.best_ap_available = True
+            self.best_ap = max(self.best_ap, ap50_95)
 
     def save_ckpt(self, ckpt_name, update_best_ckpt=False):
         if self.rank == 0:

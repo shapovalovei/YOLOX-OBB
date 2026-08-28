@@ -106,7 +106,10 @@ CUDA_VISIBLE_DEVICES=0,1 python3 tools/train.py -f exps/example/yolox_voc/yolox_
 ```
 CUDA_VISIBLE_DEVICES=0,1 python tools/eval.py -f exps/example/yolox_voc/yolox_dota_s_obb_kld.py -d 2 -b 16 -c YOLOX_outputs/yolox_dota_s_obb_kld/latest_ckpt.pth
 ```
-　Results will be save to your_data/results/VOC2012/Main
+　The evaluator writes DOTA polygon result files to
+`your_data/results/VOC2012/Main`. It does not compute AP internally and
+returns `(None, None, timing_info)`; use the external DOTA evaluation tooling
+below for canonical metrics.
  * `If test, you must comment line 151 'target = self.load_anno(index)' and uncomment line 152 'target = []' in dota_obb.py before run the above instruction. Because test-set has no annotations.`
 
 2. Merge results(You can refer to [DOTA_devkit_YOLO](https://github.com/hukaixuan19970627/DOTA_devkit_YOLO))
@@ -119,8 +122,13 @@ python DOTA_devkit_YOLO/dota_v1.5_evaluation_task1.py(You can refer to [DOTA_dev
 ```
  * `If test, you should upload your results to DOTA Evaluation Server.`
 
+The direct `DOTAEvaluator` supports single-process CPU float32 evaluation.
+CPU float16 evaluation is intentionally rejected. The `tools/eval.py` command
+and distributed launcher remain CUDA-oriented.
+
 ## Unfortunately 
-This implementation only get 0.712 mAP@0.5 on DOTA v1.0.
+The historical external DOTA evaluation workflow reported 0.712 mAP@0.5 on
+DOTA v1.0.
 
 ## Reference
 [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)
