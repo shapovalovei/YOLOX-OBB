@@ -101,36 +101,62 @@ autonomously follow a chain such as `framework → training → export → SDK`.
 
 ## Project-boundary gate
 
-Before doing meaningful work, answer these questions internally:
+### Preliminary boundary check
 
-1. Is this a generic YOLOX-OBB framework or model-correctness problem?
-2. Is this a concrete trained-model, training, export, or quality problem?
-3. Is this an SDK or product-integration problem?
+Before starting repository research or implementation, use the request to make
+a preliminary ownership check and avoid obviously operating in the wrong
+repository. Ask:
 
-Select the owning repository before implementation. If the current repository
-does not own the requested implementation, do not implement it here. Report
-the ownership mismatch, identify the correct repository, and request
-orchestrator approval before moving the work. The existence of a downstream
-related Issue is not authorization to switch repositories.
+1. Does this appear to be a generic YOLOX-OBB framework or model-correctness
+   problem?
+2. Does this appear to be a concrete trained-model, training, export, or
+   quality problem?
+3. Does this appear to be an SDK or product-integration problem?
+
+This preliminary check is triage, not proof of ownership. Do not treat the
+initial guess as the final ownership decision.
+
+### Final ownership decision
+
+Research the current repository state, Issues, PRs, history, and relevant
+external evidence sufficiently to understand the actual engineering question.
+Only then establish the owning repository and continue through the canonical
+Issue and acceptance-criteria gates. No implementation may begin until both
+the research gate and final ownership decision are satisfied.
+
+If research shows that the current repository does not own the implementation,
+do not implement it here. Stop and report the ownership mismatch, identify the
+correct repository, and require an explicitly authorized task in that owning
+repository before implementation proceeds. The existence of a downstream
+related Issue is not authorization to switch repositories. Do not
+automatically transition between `YOLOX-OBB → card-detector-training →
+react-native-scanner-sdk`.
 
 ## Default sequence
 
-For meaningful work, follow:
+For any task that may modify tracked repository content, follow:
 
 ```text
-request → project-boundary gate → research current state
-→ search OPEN/CLOSED Issues and relevant PRs and history
-→ identify or create the canonical Issue → confirm scope and acceptance criteria
-→ understand the contract → define the problem or hypothesis
-→ implement only within authorized scope → validate → commit → PR
-→ post factual Issue evidence → orchestrator review
-→ owner merge / semantic completion / Issue closure
+request
+→ preliminary project-boundary check
+→ research current repository state, Issues, PRs, history, and relevant external evidence
+→ establish the owning repository
+→ establish/use the canonical Issue and acceptance criteria
+→ formulate the hypothesis or requested behavior
+→ implementation
+→ validation
+→ commit
+→ PR
+→ factual Issue evidence
+→ orchestrator review
+→ owner merge / semantic completion / closure
 ```
 
-Research, ownership, and the canonical Issue gate always precede
-implementation. Do not jump from a task description directly to editing code.
-Bounded implementation mode may proceed autonomously only after these gates
-are satisfied.
+The preliminary boundary check helps route research; final ownership is
+established only after research. Research, final ownership, and the canonical
+Issue gate always precede implementation. Do not jump from a task description
+directly to editing code. Bounded implementation mode may proceed
+autonomously only after these gates are satisfied.
 
 ## Start-of-task repository gate
 
@@ -151,7 +177,8 @@ published history.
 ## Research gate
 
 Research must be proportional but sufficient to avoid reverting or duplicating
-maintained behavior. For meaningful changes, inspect as relevant:
+maintained behavior. For any task that may modify tracked repository content,
+inspect as relevant:
 
 - current implementation, important call sites, and regression/contract tests;
 - open Issues, related CLOSED Issues, bodies, comments, links, and acceptance
@@ -164,23 +191,17 @@ Use repository search and any authenticated or read-only GitHub mechanism; the
 `gh` CLI is optional. If Issue or PR state cannot actually be accessed, say so
 explicitly and do not claim that it was inspected.
 
-Before implementation, be able to state the owning repository, current
-behavior, evidence for the defect or request, the unchanged contract,
-files/subsystems in scope, the canonical Issue, and the acceptance criteria and
-validation that will prove completion.
+Before implementation, be able to state the preliminary ownership signal, the
+owning repository established by research, current behavior, evidence for the
+defect or request, the unchanged contract, files/subsystems in scope, the
+canonical Issue, and the acceptance criteria and validation that will prove
+completion.
 
-The lifecycle is explicitly:
-
-```text
-RESEARCH → establish ownership → establish current behavior/history
-→ establish canonical Issue/scope → formulate hypothesis or requested behavior
-→ IMPLEMENT → validate
-```
-
-Research is always first. For unclear tasks, report findings and obtain the
-orchestrator decision before implementation. For clear tasks, bounded
-implementation begins only after research and the Issue gate; “bounded” does
-not bypass them.
+Research follows the preliminary boundary check and precedes the final
+ownership decision, canonical Issue, and implementation. For unclear tasks,
+report findings and obtain the orchestrator decision before implementation.
+For clear tasks, bounded implementation begins only after research, final
+ownership, and the Issue gate; “bounded” does not bypass them.
 
 Do not research the entire repository mechanically for a tiny, unambiguous
 change. Investigate broadly when the invariant, history, or compatibility
@@ -336,21 +357,33 @@ engineering question merely because wording, evidence, or context differs.
 
 ### Mandatory Issue-first workflow
 
-Every meaningful engineering task that will result in repository changes must
-have a canonical Issue before implementation begins. This applies to code,
-tests, export behavior, CI/workflow, engineering documentation, and repository
-governance. Tiny read-only questions or pure investigation that produces no
-repository changes do not require a new Issue merely to inspect the project.
+Every task that will modify tracked repository content must have a canonical
+Issue before implementation begins. This includes modifications to source
+code, tests, export behavior, CI/workflows, README/documentation,
+`AGENTS.md`/governance, configuration, and any other tracked repository file.
+
+Pure read-only investigation that makes no repository changes does not require
+creation of a new Issue merely to inspect the project. If investigation
+discovers that implementation is required, establish or use the canonical
+Issue and confirm its scope and acceptance criteria before modifying repository
+content.
 
 Follow this order:
 
 ```text
-request → research current state
-→ search OPEN/CLOSED Issues and relevant PRs
-→ identify the existing canonical Issue or create one
-→ confirm scope and acceptance criteria → implementation
-→ validation → commit → PR → factual Issue evidence/comment
-→ orchestrator review → owner merge / semantic completion / Issue closure
+request
+→ preliminary project-boundary check
+→ research current repository state, Issues, PRs, history, and relevant external evidence
+→ establish the owning repository
+→ identify/use the canonical Issue and acceptance criteria
+→ formulate the hypothesis or requested behavior
+→ implementation
+→ validation
+→ commit
+→ PR
+→ factual Issue evidence/comment
+→ orchestrator review
+→ owner merge / semantic completion / closure
 ```
 
 Research and duplicate/overlap review come before Issue creation. If an
@@ -382,12 +415,10 @@ creating a new Issue unless explicitly authorized, changing scope or criteria,
 making project/product decisions, declaring completion, closing an Issue,
 merging a PR, or marking unresolved work complete.
 
-For meaningful implementation work, use:
-
-```text
-Issue → research → purpose-specific branch → implementation → validation
-→ logical commit(s) → PR → review → Issue evidence → owner merge and closure
-```
+For any implementation that modifies tracked repository content, use the full
+sequence above. Do not reorder its preliminary boundary check, research, final
+ownership decision, canonical Issue, implementation, validation, commit, PR,
+review, Issue evidence, or owner actions.
 
 Direct commits to `main` are prohibited by default. Prefer short-lived names
 such as `fix/<issue>-<slug>`, `feat/<issue>-<slug>`, `test/<issue>-<slug>`, or
