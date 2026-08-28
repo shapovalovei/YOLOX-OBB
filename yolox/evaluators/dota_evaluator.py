@@ -13,12 +13,34 @@ import numpy as np
 
 import torch
 
-from yolox.utils import gather, is_main_process, postprocess, postprocessobb, postprocessobb_kld, synchronize, time_synchronized
+from yolox.utils import (
+    gather,
+    is_main_process,
+    postprocessobb_kld,
+    synchronize,
+    time_synchronized,
+)
+
+
+def _get_model_device(model):
+    """Return the device of the model parameters or buffers, if available."""
+    parameter = next(model.parameters(), None)
+    if parameter is not None:
+        return parameter.device
+
+    buffer = next(model.buffers(), None)
+    if buffer is not None:
+        return buffer.device
+
+    return None
 
 
 class DOTAEvaluator:
     """
-    VOC AP Evaluation class.
+    DOTA OBB result-generation and external-evaluation adapter.
+
+    This evaluator writes polygon detections for the external DOTA evaluation
+    workflow. It does not compute internal AP metrics.
     """
 
     def __init__(
@@ -55,8 +77,7 @@ class DOTAEvaluator:
         test_size=None,
     ):
         """
-        VOC average precision (AP) Evaluation. Iterate inference on the test dataset
-        and the results are evaluated by COCO API.
+        Run OBB inference and write results for external DOTA evaluation.
 
         NOTE: This function will change training mode to False, please save states if needed.
 
@@ -64,13 +85,17 @@ class DOTAEvaluator:
             model : model to evaluate.
 
         Returns:
-            ap50_95 (float) : COCO style AP of IoU=50:95
-            ap50 (float) : VOC 2007 metric AP of IoU=50
-            summary (sr): summary info of evaluation.
+            metric_1 (None): internal AP is not computed by this adapter.
+            metric_2 (None): internal AP is not computed by this adapter.
+            timing_info (str): timing and external-evaluation information.
         """
         # TODO half to amp_test
-        tensor_type = torch.cuda.HalfTensor if half else torch.cuda.FloatTensor
         model = model.eval()
+        model_device = _get_model_device(model)
+        if model_device is not None and model_device.type == "cpu" and half:
+            raise ValueError(
+                "DOTA evaluator CPU half precision is not supported; use half=False."
+            )
         if half:
             model = model.half()
         ids = []
@@ -79,27 +104,44 @@ class DOTAEvaluator:
 
         inference_time = 0
         nms_time = 0
-        n_samples = len(self.dataloader) - 1
+        num_batches = len(self.dataloader)
+        timed_batch_limit = max(num_batches - 1, 0)
+        timed_batch_count = 0
 
         if trt_file is not None:
+            if not torch.cuda.is_available():
+                raise RuntimeError("TensorRT DOTA evaluation requires CUDA.")
+
             from torch2trt import TRTModule
 
             model_trt = TRTModule()
             model_trt.load_state_dict(torch.load(trt_file))
 
-            x = torch.ones(1, 3, test_size[0], test_size[1]).cuda()
+            trt_device = torch.device("cuda", torch.cuda.current_device())
+            x = torch.ones(
+                1, 3, test_size[0], test_size[1], device=trt_device
+            )
             model(x)
             model = model_trt
+            model_device = trt_device
 
         for cur_iter, (imgs, _, info_imgs, ids) in enumerate(
             progress_bar(self.dataloader)
         ):
             with torch.no_grad():
-                imgs = imgs.type(tensor_type)
+                if model_device is None:
+                    model_device = imgs.device
+                if model_device.type == "cpu" and half:
+                    raise ValueError(
+                        "DOTA evaluator CPU half precision is not supported; use half=False."
+                    )
+                input_dtype = torch.float16 if half else torch.float32
+                imgs = imgs.to(device=model_device, dtype=input_dtype)
 
                 # skip the the last iters since batchsize might be not enough for batch inference
-                is_time_record = cur_iter < len(self.dataloader) - 1
+                is_time_record = cur_iter < timed_batch_limit
                 if is_time_record:
+                    timed_batch_count += 1
                     start = time.time()
 
                 outputs = model(imgs)
@@ -111,7 +153,7 @@ class DOTAEvaluator:
                     infer_end = time_synchronized()
                     inference_time += infer_end - start
 
-                outputs = outputs.cpu() #add
+                outputs = outputs.cpu()
                 outputs = postprocessobb_kld(
                     outputs, self.num_classes, self.confthre, self.nmsthre
                 ) # # #
@@ -123,11 +165,15 @@ class DOTAEvaluator:
                     nms_end = time_synchronized()
                     nms_time += nms_end - infer_end
 
-                #outputs = outputs.cuda() #add
-
             data_list.update(self.convert_to_voc_format(outputs, info_imgs, ids))
 
-        statistics = torch.cuda.FloatTensor([inference_time, nms_time, n_samples])
+        if model_device is None:
+            model_device = torch.device("cpu")
+        statistics = torch.tensor(
+            [inference_time, nms_time, timed_batch_count],
+            dtype=torch.float32,
+            device=model_device,
+        )
         if distributed:
             data_list = gather(data_list, dst=0)
             data_list = ChainMap(*data_list)
@@ -138,6 +184,7 @@ class DOTAEvaluator:
         return eval_results
 
     def convert_to_voc_format(self, outputs, info_imgs, ids):
+        """Restore image-scale polygon detections for DOTA result writing."""
         predictions = {}
         for (output, img_h, img_w, img_id) in zip(
             outputs, info_imgs[0], info_imgs[1], ids
@@ -145,7 +192,7 @@ class DOTAEvaluator:
             if output is None:
                 predictions[int(img_id)] = (None, None, None)
                 continue
-            output = output.cpu() # (x1, y1, x2, y2, x3, y3, x4, y4, score, class)
+            output = output.cpu()  # polygon, score, class
             bboxes = output[:, 0:8]
 
             # preprocessing: resize
@@ -158,37 +205,52 @@ class DOTAEvaluator:
             scores = output[:, 8]
 
             predictions[int(img_id)] = (bboxes, cls, scores)
-        return predictions  # {'img_id': ([ [x1, y1, x2, y2, x3, y3, x4, y4], ... ], [class, ...], [score, ...]), ...}
+        return predictions  # image id -> (polygons, classes, scores)
 
     def evaluate_prediction(self, data_dict, statistics):
-        # data_dict {'img_id': ([ [x1, y1, x2, y2, x3, y3, x4, y4], ... ], [class, ...], [score, ...]), ...}
+        # data_dict: image id -> (polygons, classes, scores)
         if not is_main_process():
-            return 0, 0, None
+            return None, None, None
 
         logger.info("Evaluate in main process...")
 
         inference_time = statistics[0].item()
         nms_time = statistics[1].item()
-        n_samples = statistics[2].item()
+        timed_batch_count = statistics[2].item()
 
-        a_infer_time = 1000 * inference_time / (n_samples * self.dataloader.batch_size)
-        a_nms_time = 1000 * nms_time / (n_samples * self.dataloader.batch_size)
+        if timed_batch_count > 0 and self.dataloader.batch_size:
+            a_infer_time = (
+                1000
+                * inference_time
+                / (timed_batch_count * self.dataloader.batch_size)
+            )
+            a_nms_time = (
+                1000
+                * nms_time
+                / (timed_batch_count * self.dataloader.batch_size)
+            )
+            time_info = ", ".join(
+                [
+                    "Average {} time: {:.2f} ms".format(k, v)
+                    for k, v in zip(
+                        ["forward", "NMS", "inference"],
+                        [a_infer_time, a_nms_time, (a_infer_time + a_nms_time)],
+                    )
+                ]
+            )
+        else:
+            time_info = (
+                "Timing unavailable: no batch was eligible for latency statistics."
+            )
 
-        time_info = ", ".join(
-            [
-                "Average {} time: {:.2f} ms".format(k, v)
-                for k, v in zip(
-                    ["forward", "NMS", "inference"],
-                    [a_infer_time, a_nms_time, (a_infer_time + a_nms_time)],
-                )
-            ]
+        info = (
+            time_info
+            + "\nInternal AP was not computed; run the external DOTA evaluation workflow.\n"
         )
-
-        info = time_info + "\n"
 
         all_boxes = [
             [[] for _ in range(self.num_images)] for _ in range(self.num_classes)
-        ] # 一个列表包含self.num_classes个中列表， 每个中列表包含self.num_images个小列表
+        ]
         for img_num in range(self.num_images):
             bboxes, cls, scores = data_dict[img_num]
             if bboxes is None:
@@ -201,7 +263,7 @@ class DOTAEvaluator:
                     all_boxes[j][img_num] = np.empty([0, 9], dtype=np.float32)
                     continue
 
-                c_dets = torch.cat((bboxes, scores.unsqueeze(1)), dim=1) # [[x1, y1, x2, y2, x3, y3, x4, y4, score], ...]
+                c_dets = torch.cat((bboxes, scores.unsqueeze(1)), dim=1)
                 all_boxes[j][img_num] = c_dets[mask_c].numpy()
 
             sys.stdout.write(
@@ -210,7 +272,5 @@ class DOTAEvaluator:
             sys.stdout.flush()
 
         with tempfile.TemporaryDirectory() as tempdir:
-            mAP50, mAP70 = self.dataloader.dataset.evaluate_detections(
-                all_boxes, tempdir
-            )
-            return mAP50, mAP70, info
+            self.dataloader.dataset.evaluate_detections(all_boxes, tempdir)
+        return None, None, info
