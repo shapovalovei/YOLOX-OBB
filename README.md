@@ -37,24 +37,31 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 ```shell
 cd YOLOX-OBB
 pip3 install -r requirements.txt
-pip3 install -v -e
+pip install -v -e . --no-build-isolation
 ```
 2. Install pycocotools
 ```shell
 pip3 install cython; pip3 install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
 ```
-3. Install swig
+PyTorch must already be installed in the active environment because the root
+package uses PyTorch C++ extension tooling. The root installation builds both
+the YOLOX native extension and the rotated-IoU extension. A compatible C/C++
+compiler and build toolchain are required. SWIG is not required for normal
+installation because the generated Python and C++ wrapper sources are included
+in the repository. SWIG is only needed by maintainers who intentionally
+regenerate the wrapper from `polyiou.i`.
+
+Verify the rotated-IoU capability with:
 ```shell
-sudo apt-get install swig
+python - <<'PY'
+import yolox.utils
+from DOTA_devkit_YOLO import polyiou
+
+p = polyiou.VectorDouble([0, 0, 2, 0, 2, 2, 0, 2])
+print(polyiou.iou_poly(p, p))
+PY
 ```
-4. Create the c++ extension for python
-```shell
-cd DOTA_devkit_YOLO
-swig -c++ -python polyiou.i
-python setup.py build_ext --inplace
-cd -
-```
-5. Install apex
+3. Install apex
 ```shell
 git clone https://github.com/NVIDIA/apex
 cd apex

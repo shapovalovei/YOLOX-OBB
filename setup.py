@@ -15,6 +15,7 @@ assert torch_ver >= [1, 7], "Requires PyTorch >= 1.7"
 def get_extensions():
     this_dir = path.dirname(path.abspath(__file__))
     extensions_dir = path.join(this_dir, "yolox", "layers", "csrc")
+    dota_dir = path.join(this_dir, "DOTA_devkit_YOLO")
 
     main_source = path.join(extensions_dir, "vision.cpp")
     sources = glob.glob(path.join(extensions_dir, "**", "*.cpp"))
@@ -34,7 +35,14 @@ def get_extensions():
             include_dirs=include_dirs,
             define_macros=define_macros,
             extra_compile_args=extra_compile_args,
-        )
+        ),
+        setuptools.Extension(
+            "DOTA_devkit_YOLO._polyiou",
+            sources=[
+                path.join(dota_dir, "polyiou_wrap.cxx"),
+                path.join(dota_dir, "polyiou.cpp"),
+            ],
+        ),
     ]
 
     return ext_modules
@@ -60,5 +68,5 @@ setuptools.setup(
     ext_modules=get_extensions(),
     classifiers=["Programming Language :: Python :: 3", "Operating System :: OS Independent"],
     cmdclass={"build_ext": torch.utils.cpp_extension.BuildExtension},
-    packages=setuptools.find_packages(),
+    packages=setuptools.find_packages() + ["DOTA_devkit_YOLO"],
 )
