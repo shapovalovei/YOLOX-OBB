@@ -30,6 +30,11 @@ def make_parser():
     )
     parser.add_argument("--no-onnxsim", action="store_true", help="use onnxsim or not")
     parser.add_argument(
+        "--dynamic-shape",
+        action="store_true",
+        help="export with dynamic batch and square spatial dimensions",
+    )
+    parser.add_argument(
         "-f",
         "--exp_file",
         default=None,
@@ -47,6 +52,55 @@ def make_parser():
     )
 
     return parser
+
+
+def get_export_kwargs(input_name, output_name, opset, dynamic_shape=False):
+    """Build the legacy exporter arguments without changing static defaults."""
+    export_kwargs = {
+        "input_names": [input_name],
+        "output_names": [output_name],
+        "opset_version": opset,
+    }
+    if dynamic_shape:
+        export_kwargs["dynamic_axes"] = {
+            input_name: {0: "batch", 2: "height", 3: "width"},
+            output_name: {0: "batch", 1: "predictions"},
+        }
+    return export_kwargs
+
+
+def get_output_field_count(head):
+    """Return the static last-axis width for the maintained YOLOX head."""
+    base_fields = 6 if hasattr(head, "angle_preds") else 5
+    return base_fields + head.num_classes
+
+
+def set_static_output_field_dim(model_path, output_tensor_name, field_count):
+    """Make the known field axis explicit after legacy dynamic export."""
+    import onnx
+
+    onnx_model = onnx.load(model_path)
+    matching_outputs = [
+        value_info
+        for value_info in onnx_model.graph.output
+        if value_info.name == output_tensor_name
+    ]
+    if len(matching_outputs) != 1:
+        raise ValueError("could not identify the exported output tensor")
+
+    output_shape = matching_outputs[0].type.tensor_type.shape
+    if len(output_shape.dim) != 3:
+        raise ValueError("expected an exported detection tensor with rank 3")
+    field_dim = output_shape.dim[2]
+    if field_dim.dim_value not in (0, int(field_count)):
+        raise ValueError(
+            "exported output field dimension {} does not match {}".format(
+                field_dim.dim_value, field_count
+            )
+        )
+    field_dim.ClearField("dim_param")
+    field_dim.dim_value = int(field_count)
+    onnx.save(onnx_model, model_path)
 
 
 @logger.catch
@@ -82,9 +136,12 @@ def main():
         model,
         dummy_input,
         args.output_name,
-        input_names=[args.input],
-        output_names=[args.output],
-        opset_version=args.opset,
+        **get_export_kwargs(
+            args.input,
+            args.output,
+            args.opset,
+            dynamic_shape=args.dynamic_shape,
+        )
     )
     logger.info("generated onnx model named {}".format(args.output_name))
 
@@ -99,6 +156,14 @@ def main():
         assert check, "Simplified ONNX model could not be validated"
         onnx.save(model_simp, args.output_name)
         logger.info("generated simplified onnx model named {}".format(args.output_name))
+
+    if args.dynamic_shape:
+        set_static_output_field_dim(
+            args.output_name,
+            args.output,
+            get_output_field_count(model.head),
+        )
+        logger.info("preserved static output field dimension in {}".format(args.output_name))
 
 
 if __name__ == "__main__":
