@@ -32,11 +32,65 @@ Notes:
 * -c: the model you have trained
 * -o: opset version, default 11. **However, if you will further convert your onnx model to [OpenVINO](https://github.com/Megvii-BaseDetection/YOLOX/demo/OpenVINO/), please specify the opset version to 10.**
 * --no-onnxsim: disable onnxsim
-* To customize an input shape for onnx model,  modify the following code in tools/export.py:
+* To customize a static input shape for an onnx model, modify the following code in `tools/export_onnx.py`:
 
     ```python
     dummy_input = torch.randn(1, 3, exp.test_size[0], exp.test_size[1])
     ```
+
+### Dynamic OBB export (opt-in)
+
+The existing static export remains the default. For an OBB experiment, pass
+`--dynamic-shape` to export a model with this input contract:
+
+```shell
+python3 tools/export_onnx.py --dynamic-shape \
+    --output-name yolox_obb_dynamic.onnx \
+    -f exps/your_dir/your_obb_exp.py -c your_obb.pth
+```
+
+```text
+[batch, 3, size, size]
+```
+
+The first dynamic-shape slice supports square `size` values divisible by 32.
+The maintained regression contract covers `320`, `416`, and `512`, and also
+batch size 2 at `416`.
+
+The exported OBB output remains before OBB decode and rotated postprocess:
+
+```text
+[batch, predictions, 6 + num_classes]
+[tx, ty, tw, th, angle_logit, objectness_probability, class_probabilities...]
+```
+
+Objectness and class fields are already probabilities. Decode the exported
+output using the runtime square input size before calling
+`postprocessobb_kld`:
+
+```python
+from yolox.utils.demo_utils import decode_obb_raw_outputs
+
+decoded = decode_obb_raw_outputs(
+    onnx_outputs,
+    input_shape=(size, size),
+    num_classes=num_classes,
+)
+```
+
+The decoder preserves P3/P4/P5 level order, uses strides `8/16/32`, and
+applies the maintained OBB semantics:
+
+```text
+xy = (txy + grid) * stride
+wh = exp(twh) * stride
+angle = (sigmoid(angle_logit) - 0.5) * 180 degrees
+```
+
+Decode and rotated NMS remain outside the ONNX graph. ONNX Runtime is the
+reference runtime for this dynamic OBB path. Rectangular inputs are not part
+of this first slice, and the TensorRT, OpenVINO, ncnn, and MegEngine examples
+remain unchanged and do not establish dynamic OBB support.
 
 2. Convert a standard YOLOX model by -f. When using -f, the above command is equivalent to:
 

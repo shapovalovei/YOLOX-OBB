@@ -238,6 +238,9 @@ class YOLOXHeadOBB_KLD(nn.Module):
             outputs = torch.cat(
                 [x.flatten(start_dim=2) for x in outputs], dim=2
             ).permute(0, 2, 1)
+            outputs = outputs.reshape(
+                outputs.shape[0], -1, 6 + self.num_classes
+            )
             # [batch, n_anchors_all, 5 + 1 +  80]
             if self.decode_in_inference:
                 return self.decode_outputs(outputs, dtype=xin[0].type()) #tuili
