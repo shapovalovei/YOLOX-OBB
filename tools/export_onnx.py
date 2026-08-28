@@ -69,6 +69,25 @@ def get_export_kwargs(input_name, output_name, opset, dynamic_shape=False):
     return export_kwargs
 
 
+def validate_dynamic_export_shape(input_shape):
+    """Validate the square spatial shape used to trace the dynamic graph."""
+    try:
+        if len(input_shape) != 2:
+            raise ValueError
+        height, width = input_shape
+    except (TypeError, ValueError):
+        raise ValueError("dynamic export requires (height, width) dimensions")
+    if not all(isinstance(dimension, int) for dimension in (height, width)):
+        raise ValueError("dynamic export requires integer (height, width) dimensions")
+    if height <= 0 or width <= 0:
+        raise ValueError("dynamic export dimensions must be positive")
+    if height != width:
+        raise ValueError("dynamic export supports square spatial dimensions only")
+    if height % 32 != 0:
+        raise ValueError("dynamic export size must be divisible by 32")
+    return height, width
+
+
 def get_output_field_count(head):
     """Return the static last-axis width for the maintained YOLOX head."""
     base_fields = 6 if hasattr(head, "angle_preds") else 5
@@ -109,6 +128,8 @@ def main():
     logger.info("args value: {}".format(args))
     exp = get_exp(args.exp_file, args.name)
     exp.merge(args.opts)
+    if args.dynamic_shape:
+        validate_dynamic_export_shape(exp.test_size)
 
     if not args.experiment_name:
         args.experiment_name = exp.exp_name

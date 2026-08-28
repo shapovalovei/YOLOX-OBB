@@ -37,6 +37,7 @@ try:
         get_output_field_count,
         make_parser,
         set_static_output_field_dim,
+        validate_dynamic_export_shape,
     )
     from yolox.exp.yolox_base_obb_kld import ExpOBB_KLD
     from yolox.models.network_blocks import SiLU
@@ -242,6 +243,12 @@ class ONNXDynamicExportTests(unittest.TestCase):
         dynamic_output = self.shape_of(self.output_for(self.dynamic_graph))
         self.assertEqual(dynamic_input, ["batch", 3, "height", "width"])
         self.assertEqual(dynamic_output, ["batch", "predictions", 7])
+
+    def test_dynamic_export_rejects_unsupported_trace_shapes(self):
+        with self.assertRaisesRegex(ValueError, "square"):
+            validate_dynamic_export_shape((320, 416))
+        with self.assertRaisesRegex(ValueError, "divisible by 32"):
+            validate_dynamic_export_shape((400, 400))
 
     def test_dynamic_runtime_shapes_and_external_decode(self):
         cases = (
