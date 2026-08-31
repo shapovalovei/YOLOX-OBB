@@ -9,7 +9,15 @@ import numpy as np
 
 from yolox.utils import adjust_box_anns
 
-from ..data_augment_obb import box_candidates, random_perspective
+from ..data_augment_obb import (
+    _clip_polygon_to_rect,
+    _obb_target_to_corners,
+    _obb_to_target,
+    _polygon_area,
+    box_candidates,
+    corners_to_obb,
+    random_perspective,
+)
 from .datasets_wrapper import Dataset
 
 
@@ -196,8 +204,6 @@ class MosaicDetectionOBB(Dataset):
         cp_scale_ratio *= jit_factor
         if FLIP:
             cp_img = cp_img[:, ::-1, :]
-            cp_labels = cp_labels.copy()
-            cp_labels[:, 4] = -cp_labels[:, 4]
 
         origin_h, origin_w = cp_img.shape[:2]
         target_h, target_w = origin_img.shape[:2]
@@ -232,10 +238,39 @@ class MosaicDetectionOBB(Dataset):
         keep_list = box_candidates(cp_bboxes_origin_np.T, cp_bboxes_transformed_np.T, 5)
 
         if keep_list.sum() >= 1.0:
-            cls_labels = cp_labels[keep_list, 4:6].copy()
-            box_labels = cp_bboxes_transformed_np[keep_list]
-            labels = np.hstack((box_labels, cls_labels))
-            origin_labels = np.vstack((origin_labels, labels))
+            # The first four label fields encode center +/- long/short
+            # dimensions, not polygon corners.  Reconstruct the actual OBB,
+            # apply the same resize/flip/crop transform as the copied image,
+            # and fit the canonical OBB of its visible polygon.
+            cp_corners = np.asarray(
+                [_obb_target_to_corners(label) for label in cp_labels],
+                dtype=np.float64,
+            )
+            cp_corners *= cp_scale_ratio
+            if FLIP:
+                cp_corners[:, :, 0] = origin_w - cp_corners[:, :, 0]
+            cp_corners -= np.asarray([x_offset, y_offset], dtype=np.float64)
+
+            visible_labels = []
+            for index in np.flatnonzero(keep_list):
+                visible_polygon = _clip_polygon_to_rect(
+                    cp_corners[index], target_w, target_h
+                )
+                if _polygon_area(visible_polygon) <= 1e-6:
+                    continue
+                try:
+                    obb = corners_to_obb(visible_polygon)
+                except ValueError:
+                    continue
+                if not np.isfinite(obb).all() or min(obb[2], obb[3]) <= 1e-6:
+                    continue
+                visible_labels.append(_obb_to_target(obb, cp_labels[index, 5]))
+
+            if visible_labels:
+                origin_labels = np.vstack((
+                    origin_labels,
+                    np.asarray(visible_labels, dtype=cp_labels.dtype),
+                ))
             origin_img = origin_img.astype(np.float32)
             origin_img = 0.5 * origin_img + 0.5 * padded_cropped_img.astype(np.float32)
 
