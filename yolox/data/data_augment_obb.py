@@ -71,10 +71,10 @@ def obb_to_corners(center_x, center_y, width, height, angle):
 
 
 def corners_to_obb(corners):
-    """Fit the canonical fork OBB to a transformed quadrilateral."""
+    """Fit the canonical fork OBB to a transformed convex polygon."""
     points = np.asarray(corners, dtype=np.float32).reshape(-1, 2)
-    if points.shape[0] < 4 or not np.isfinite(points).all():
-        raise ValueError("OBB corners are not finite")
+    if points.shape[0] < 3 or not np.isfinite(points).all():
+        raise ValueError("OBB polygon is not finite")
     rect = cv2.minAreaRect(points)
     rectangle = cv2.boxPoints(rect).astype(np.float64)
     edges = np.roll(rectangle, -1, axis=0) - rectangle
@@ -94,6 +94,72 @@ def corners_to_obb(corners):
         angle += 180.0
     center_x, center_y = rectangle.mean(axis=0)
     return np.asarray([center_x, center_y, long_edge, short_edge, angle], dtype=np.float64)
+
+
+def _clip_polygon_to_rect(polygon, width, height):
+    """Return the convex polygon intersection with ``[0,width] x [0,height]``."""
+    points = np.asarray(polygon, dtype=np.float64).reshape(-1, 2)
+    if len(points) < 3 or not np.isfinite(points).all():
+        return np.empty((0, 2), dtype=np.float64)
+
+    # Sutherland-Hodgman clipping keeps the polygon edges intact while adding
+    # intersections with each canvas edge.  Unlike coordinate clipping, it
+    # can produce any number of vertices needed by the visible polygon.
+    for axis, boundary, keep_greater in (
+        (0, 0.0, True),
+        (0, float(width), False),
+        (1, 0.0, True),
+        (1, float(height), False),
+    ):
+        clipped = []
+        previous = points[-1]
+        previous_inside = (
+            previous[axis] >= boundary
+            if keep_greater
+            else previous[axis] <= boundary
+        )
+        for current in points:
+            current_inside = (
+                current[axis] >= boundary
+                if keep_greater
+                else current[axis] <= boundary
+            )
+            if current_inside != previous_inside:
+                delta = current - previous
+                denominator = delta[axis]
+                if abs(denominator) > 1e-12:
+                    fraction = (boundary - previous[axis]) / denominator
+                    clipped.append(previous + fraction * delta)
+            if current_inside:
+                clipped.append(current)
+            previous = current
+            previous_inside = current_inside
+        points = np.asarray(clipped, dtype=np.float64).reshape(-1, 2)
+        if len(points) == 0:
+            return points
+
+    # Consecutive canvas-edge crossings can represent the same corner.  Drop
+    # duplicate vertices so a boundary touch cannot create a fake polygon.
+    distinct = [points[0]]
+    for point in points[1:]:
+        if np.linalg.norm(point - distinct[-1]) > 1e-9:
+            distinct.append(point)
+    if len(distinct) > 1 and np.linalg.norm(distinct[0] - distinct[-1]) <= 1e-9:
+        distinct.pop()
+    return np.asarray(distinct, dtype=np.float64).reshape(-1, 2)
+
+
+def _polygon_area(points):
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    if len(points) < 3 or not np.isfinite(points).all():
+        return 0.0
+    return abs(
+        0.5
+        * float(
+            np.dot(points[:, 0], np.roll(points[:, 1], -1))
+            - np.dot(points[:, 1], np.roll(points[:, 0], -1))
+        )
+    )
 
 
 def _obb_target_to_corners(target):
@@ -207,7 +273,7 @@ def random_perspective(
             xy = xy[:, :2].reshape(n, 4, 2)
 
         # Retain HBB candidate filtering, but reconstruct the final OBB from
-        # the transformed polygon rather than retaining the source angle.
+        # the visible polygon rather than retaining the source angle.
         xy_hbb = np.concatenate(
             (
                 xy[:, :, 0].min(1),
@@ -217,11 +283,6 @@ def random_perspective(
             )
         ).reshape(4, n).T
 
-        # Clip the polygon used for reconstruction consistently with the
-        # existing augmentation's clipped candidate-box behavior.
-        clipped_xy = xy.copy()
-        clipped_xy[:, :, 0] = clipped_xy[:, :, 0].clip(0, width)
-        clipped_xy[:, :, 1] = clipped_xy[:, :, 1].clip(0, height)
         xy_hbb[:, [0, 2]] = xy_hbb[:, [0, 2]].clip(0, width)
         xy_hbb[:, [1, 3]] = xy_hbb[:, [1, 3]].clip(0, height)
 
@@ -229,8 +290,11 @@ def random_perspective(
         keep = valid_w & box_candidates(box1=targets[:, :4].T * s, box2=xy_hbb.T)
         updated_targets = []
         for index in np.flatnonzero(keep):
+            clipped_polygon = _clip_polygon_to_rect(xy[index], width, height)
+            if _polygon_area(clipped_polygon) <= 1e-6:
+                continue
             try:
-                obb = corners_to_obb(clipped_xy[index])
+                obb = corners_to_obb(clipped_polygon)
             except ValueError:
                 continue
             if not np.isfinite(obb).all() or min(obb[2], obb[3]) <= 1e-6:
