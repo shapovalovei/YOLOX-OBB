@@ -1,6 +1,6 @@
 # YOLOX-OBB final framework handoff
 
-Status: implementation-phase documentation for Issue [#28](https://github.com/shapovalovei/YOLOX-OBB/issues/28).
+Status: final framework documentation handoff for Issue [#28](https://github.com/shapovalovei/YOLOX-OBB/issues/28).
 
 This document records the final maintained framework contract and the
 cross-project actions that follow from it. The behavioral framework baseline
@@ -36,7 +36,7 @@ genuine assignment CUDA OOM.
 The following are not framework-completion claims:
 
 - true projective perspective semantics;
-- CUDA assignment VRAM, OOM, latency, and CPU-equivalence behavior;
+- supported CUDA autocast FP16 behavior on the tested T4/PyTorch baseline;
 - QNN, Android GPU, and Core ML target validation;
 - model-quality impact of the framework fixes;
 - a checkpoint, final mobile artifact, or SDK device qualification under the
@@ -74,6 +74,7 @@ boundary-geometry validation [#24](https://github.com/shapovalovei/YOLOX-OBB/iss
 KLD validation [#25](https://github.com/shapovalovei/YOLOX-OBB/issues/25),
 assignment-fallback validation [#26](https://github.com/shapovalovei/YOLOX-OBB/issues/26),
 assignment-memory validation [#27](https://github.com/shapovalovei/YOLOX-OBB/issues/27),
+and completed CUDA assignment validation [#44](https://github.com/shapovalovei/YOLOX-OBB/issues/44),
 and perspective validation [#32](https://github.com/shapovalovei/YOLOX-OBB/issues/32).
 The merged PRs and exact revisions are recorded in the ledger.
 
@@ -271,18 +272,119 @@ trained-model comparison was established by that framework work.
 | CUDA assignment fallback classification | [Issue #26](https://github.com/shapovalovei/YOLOX-OBB/issues/26), [Issue #40](https://github.com/shapovalovei/YOLOX-OBB/issues/40), [PR #41](https://github.com/shapovalovei/YOLOX-OBB/pull/41), `4f577cac81d7b6a796461ff6a4713c392b651d1c` | Any `RuntimeError` could trigger cache clearing and CPU retry | Only validated modern or legacy CUDA OOM signatures retry on CPU; ordinary errors propagate | No successful-assignment change | Failure semantics only | No | Correctness proven; no model-quality claim |
 | Optional MixUp geometry | [Issue #30](https://github.com/shapovalovei/YOLOX-OBB/issues/30), [PR #42](https://github.com/shapovalovei/YOLOX-OBB/pull/42), `0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce` | Cropped axis-aligned envelope could retain an angle that did not describe the visible object | Transformed corners are clipped as a visible polygon and refit to a canonical OBB | Yes only when MixUp is enabled | No | Six-field contract and compositing behavior preserved | Correctness proven; no maintained-recipe effect while MixUp is disabled |
 | Perspective validation | [Issue #32](https://github.com/shapovalovei/YOLOX-OBB/issues/32) | Non-zero parameter selected a perspective warp without adding projective terms | Defect documented; no implementation performed | No current recipe effect | Image warp path differs, but no projective label transform exists | No API change | Defect proven; quality impact unmeasured |
-| Assignment memory/equivalence validation | [Issue #27](https://github.com/shapovalovei/YOLOX-OBB/issues/27) | GPU behavior was inferred from CPU concerns | CPU scaling was measured; CUDA VRAM/OOM/latency and GPU/CPU equivalence remain unverified | No implementation | Unverified on CUDA | No | CPU evidence only; GPU quality/runtime unverified |
+| Assignment memory/equivalence validation | [Issue #27](https://github.com/shapovalovei/YOLOX-OBB/issues/27), [Issue #44](https://github.com/shapovalovei/YOLOX-OBB/issues/44), [final T4 handoff](https://github.com/shapovalovei/YOLOX-OBB/issues/44#issuecomment-5484241937) | GPU behavior was initially inferred from CPU concerns | CPU scaling was supplemented by bounded T4 CUDA VRAM/latency/OOM and GPU/CPU equivalence validation; no framework implementation change was needed | No implementation | Bounded CUDA behavior validated; FP16 autocast limitation recorded separately | No | Assignment correctness/resource evidence; no model-quality claim |
 
 The compact representative from [#27](https://github.com/shapovalovei/YOLOX-OBB/issues/27)
 is a CPU-only 416-pixel, 16-class dense-assignment matrix: increasing target
 density `G` from 25 to 150 increased median latency from 192.9 ms to 1329.5 ms
-and delta RSS from 26.4 MiB to 134.8 MiB. High-density tensors therefore
-exist, but this does not establish CUDA behavior or require an optimization.
+and delta RSS from 26.4 MiB to 134.8 MiB. The completed [#44 T4 validation
+handoff](https://github.com/shapovalovei/YOLOX-OBB/issues/44#issuecomment-5484241937)
+now supplies the corresponding bounded CUDA evidence.
 
 For assignment fallback, the accepted modern signal is
 `torch.cuda.OutOfMemoryError`; the validated legacy signals are `RuntimeError`
 messages beginning `CUDA out of memory` or `CUDA error: out of memory`. CPU,
 MPS, generic memory, and unrelated runtime errors do not enter the retry path.
+
+## CUDA assignment validation (#44)
+
+Issue [#44](https://github.com/shapovalovei/YOLOX-OBB/issues/44) is closed as
+Completed with accepted Verdict A. It completed the missing CUDA evidence on
+the exact behavioral baseline
+`0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce`. The detailed factual evidence is
+in the [final T4 handoff](https://github.com/shapovalovei/YOLOX-OBB/issues/44#issuecomment-5484241937),
+accepted by the orchestrator in [comment 5484274489](https://github.com/shapovalovei/YOLOX-OBB/issues/44#issuecomment-5484274489).
+
+### Environment and workload
+
+- `torch.cuda.is_available(): True`; GPU: Tesla T4; VRAM: 15,360 MiB.
+- Python: 3.13.15; PyTorch: 2.11.0+cu128; `torch.version.cuda`: 12.8.
+- Primary 416: 3,549 anchors (`52^2 + 26^2 + 13^2`), FP32, `C=1,16`,
+  `G=1,5,10,25,50,100,150`, deterministic sparse and dense regimes.
+- All 28/28 primary cells completed. The reproduced sparse `K` sequence was
+  `76, 375, 680, 1440, 2044, 2853, 2789`; dense `K` was 3,549 for every `G`.
+- Secondary 1024: 21,504 anchors (`128^2 + 64^2 + 32^2`), `C=16`, selected
+  `G=1,10,25,50` in sparse and dense regimes; all 8/8 selected FP32 cells
+  completed. Sparse `K` was `75, 793, 1986, 3602`; dense `K` was 21,504 for
+  every selected `G`.
+
+### Memory, latency, and OOM
+
+Timing used warmup and synchronized median measurements; allocator peaks were
+reset between cells. No natural CUDA OOM occurred in any of the 36 bounded
+FP32 cells, and no OOM was forced. The maximum 416 peak was 107.255 MiB
+allocated / 168 MiB reserved at dense `G=150, C=16`; the maximum selected
+1024 peak was 218.871 MiB / 344 MiB at dense `G=50, C=16`. The largest
+synchronized medians were 705.331 ms for the 416 matrix and 199.202 ms for
+the selected 1024 matrix. The corresponding peak allocated/reserved deltas
+were 104.449 / 144 MiB and 214.084 / 320 MiB. These are bounded synthetic
+stress measurements, not a product latency SLA or training-throughput claim.
+
+### FP32 GPU/CPU fallback equivalence
+
+For identical deterministic inputs, `get_assignments(mode="gpu")` and
+`get_assignments(mode="cpu")` produced matching shapes, dtypes, devices, and
+ordering. In the stable cases 416 `C=1,G=10` sparse, 416 `C=1,G=25` dense,
+416 `C=16,G=25` dense, and 416 `C=16,G=100` dense, `num_fg`, `fg_mask`,
+`matched_gt_inds`, and `gt_matched_classes` were exact;
+`pred_ious_this_matching` was allclose, with maximum observed stable absolute
+difference `1.788e-7`.
+
+The bounded near-tie stress produced one 4-index `fg_mask` divergence at
+indices `1272, 1274, 1326, 1327`. `num_fg` remained equal, matched GT fields
+remained equal, and the relevant cost margin was zero/quantized; the cost
+maximum absolute difference was `3.576e-7`. This is expected floating-point
+tie sensitivity, not a fallback correctness defect.
+
+### FP16 autocast
+
+The maintained true CUDA autocast path was tested for 416 dense `C=1,G=25`,
+`C=16,G=25`, and `C=16,G=100`. On this PyTorch/runtime it is unsupported:
+`binary_cross_entropy` / `BCELoss` triggers the PyTorch autocast safety guard
+before cost completion. This is not an OOM and not a GPU/CPU fallback
+correctness defect. No source workaround was applied, and AMP training must
+not be claimed as supported by this evidence.
+
+As a separate direct-FP16-input diagnostic, all three selected cases completed
+with FP32 KLD/BCE/cost intermediates and equivalent GPU/CPU fallback outputs:
+
+| C | G | synchronized median ms | peak allocated/reserved MiB | major KLD/class/cost dtypes |
+|---:|---:|---:|---:|:---|
+| 1 | 25 | 96.119 | 12.748 / 30 | float32 |
+| 16 | 25 | 96.951 | 21.690 / 30 | float32 |
+| 16 | 100 | 372.644 | 74.747 / 116 | float32 |
+
+The diagnostic does not substitute for a supported autocast result.
+
+### Tests and evidence classification
+
+The required focused suites passed: assignment fallback 8/8, OBB assignment
+geometry 5/5, KLD prediction/target 5/5, KLD numerical stability 18/18, and
+OBB target validity 11/11. Full discovery reported 101 total, 91 passed,
+6 skipped, 2 known `_polyiou` import errors, and 2 unrelated MixUp failures
+under Python 3.13/PyTorch 2.11. MixUp is disabled in the current controlled
+training recipe; those full-suite failures are outside #44 acceptance and
+were not repaired.
+
+**FACT:** The T4 gate passed, all bounded FP32 cells completed without natural
+OOM, stable fallback outputs were equivalent, and the focused suites passed.
+
+**INFERENCE:** Current bounded FP32 CUDA assignment behavior is acceptable;
+the evidence does not justify an assignment-memory optimization phase or a
+fallback-correctness implementation phase. The near-tie result is explained
+by zero/quantized cost margins.
+
+**UNVERIFIED:** Model quality, convergence, training throughput, behavior
+beyond the tested matrix, and a supported CUDA autocast FP16 result remain
+unestablished.
+
+### Final #44 decision
+
+**A — CURRENT CUDA BEHAVIOR ACCEPTABLE.** No assignment-memory optimization
+phase is justified by the bounded evidence, and no fallback correctness
+implementation phase is required. The true CUDA FP16 autocast limitation is
+recorded for compatibility awareness, not promoted automatically to a new
+implementation recommendation. See the [orchestrator acceptance](https://github.com/shapovalovei/YOLOX-OBB/issues/44#issuecomment-5484274489).
 
 ## Earlier quality-relevant framework fixes
 
@@ -335,8 +437,9 @@ final framework semantics, not merely executing an existing checkpoint.
 
 Overall recommendation: run a fresh controlled training experiment pinned to
 the final behavioral framework revision before making a final-framework model
-quality claim. Do not assume that the new run will outperform the historical
-champion.
+quality claim. Training is a downstream future phase and is not being started
+as part of Issue #28 or PR #43. Do not assume that the new run will outperform
+the historical champion.
 
 ### Historical training provenance
 
@@ -395,11 +498,11 @@ separate change; this handoff does not modify that repository.
 
 ### Recipe policy
 
-No recipe change is implied by this handoff. The durable EXP02 recipe records
-MixUp disabled and the inspected maintained recipes use `perspective=0.0`.
-Keep those settings for a controlled comparison unless a separate experiment
-authorizes a recipe change. Enabling MixUp or perspective is not a consequence
-of the framework fixes.
+No recipe change is implied by this handoff. The durable EXP02 and current
+controlled training recipe records MixUp disabled, and the inspected
+maintained recipes use `perspective=0.0`. Keep those settings for a controlled
+comparison unless a separate experiment authorizes a recipe change. Enabling
+MixUp or perspective is not a consequence of the framework fixes.
 
 ### Post-retrain validation
 
@@ -540,13 +643,13 @@ or toolchain is a validation blocker, not evidence of a generic framework bug.
 | KLD stability #33/#36 | Pin final SHA and retrain candidate | Required for final-semantics candidate | After retrain | No | Only after qualification | Loss/gradient stability plus model quality | card-detector-training |
 | Training decode #37/#38/#39 | Pin final SHA and retrain candidate | Required for final-semantics candidate | After retrain | No | Only after qualification | Finite gradients and model quality | card-detector-training |
 | Earlier assignment/angle fixes | Included by final pin | Recommended in same run | After retrain if artifact adopted | No | Only after qualification | Assignment and geometry analysis | card-detector-training |
-| CUDA fallback #26/#40/#41 | Use final pin; no recipe change | No separate run | No | No | No | Real CUDA behavior remains unverified | YOLOX-OBB |
+| CUDA assignment/fallback #26/#40/#41/#44 | Use final pin; preserve current fallback boundary | No separate run | No | No | No | T4 validation complete; no optimization or fallback-correctness phase justified | YOLOX-OBB |
 | Optional MixUp #30/#42 | No action while disabled; enable only by experiment | Only if enabled | After a qualifying retrain | No | Only after qualification | MixUp-enabled label/quality gate | card-detector-training |
 | Dynamic raw ONNX #5/#12 | No retrain | No | Only when choosing a dynamic ONNX artifact | No | After concrete export review | Shape/layout/runtime parity | card-detector-training |
 | DOTA evaluator #13/#16 | No retrain | No | No | No | No | Use real external evaluation | YOLOX-OBB / card-detector-training |
 | Rotated-IoU packaging #14/#17 | No retrain | No | No | No | No | Install/package checks | YOLOX-OBB |
 | Perspective #32 | No current action | No | No | No | No | Deferred contract decision | YOLOX-OBB |
-| Assignment memory #27 | No optimization action | No | No | No | No | CUDA VRAM/latency/equivalence validation | YOLOX-OBB |
+| Assignment memory/equivalence #27/#44 | No optimization action; preserve current implementation | No | No | No | No | 28/28 primary and 8/8 selected secondary FP32 cells; stable GPU/CPU equivalence | YOLOX-OBB |
 
 ## Provenance model
 
@@ -592,7 +695,7 @@ filename, chat transcript, or an unverified local artifact.
 | Limitation | Evidence/status | Owner | Next trigger |
 |---|---|---|---|
 | True projective perspective semantics | [#32](https://github.com/shapovalovei/YOLOX-OBB/issues/32) proves non-zero `perspective` does not add projective matrix terms; maintained recipes inspected use `0.0`; not fixed | YOLOX-OBB | Explicit augmentation-contract decision and implementation Issue |
-| CUDA assignment VRAM/OOM/latency/equivalence | [#27](https://github.com/shapovalovei/YOLOX-OBB/issues/27) measured CPU scaling only; CUDA impact remains unverified | YOLOX-OBB | Matching CUDA hardware and bounded validation Issue |
+| True CUDA autocast FP16 support | [#44](https://github.com/shapovalovei/YOLOX-OBB/issues/44) tested the maintained path on T4/PyTorch 2.11; BCE triggers the autocast safety guard | YOLOX-OBB | Separate authorized compatibility research only if AMP becomes a requirement |
 | QNN hardware validation | [#15](https://github.com/shapovalovei/YOLOX-OBB/issues/15), [#19](https://github.com/shapovalovei/YOLOX-OBB/issues/19) identify risk but lack target compiler/session evidence | YOLOX-OBB / target owner | Real target compiler, partition/fallback trace, and parity run |
 | Android GPU target validation | SDK [#215](https://github.com/shapovalovei/react-native-scanner-sdk/issues/215), [#237](https://github.com/shapovalovei/react-native-scanner-sdk/issues/237), and [#302](https://github.com/shapovalovei/react-native-scanner-sdk/issues/302) retain target-specific GPU rejection; no public promotion | react-native-scanner-sdk | New target validation only if the supported-device requirement changes |
 | Core ML target validation | SDK [#216](https://github.com/shapovalovei/react-native-scanner-sdk/issues/216), [#221](https://github.com/shapovalovei/react-native-scanner-sdk/issues/221), and [#236](https://github.com/shapovalovei/react-native-scanner-sdk/issues/236) close the current research/qualification path without public Core ML promotion | react-native-scanner-sdk | Deferred public support; no framework action |
@@ -600,6 +703,16 @@ filename, chat transcript, or an unverified local artifact.
 | Concrete final mobile artifact | Historical EXP02 artifacts predate the final framework; no replacement is selected | card-detector-training | Accepted checkpoint plus reproducible export |
 | SDK device qualification | EXP02 integration/qualification remains downstream work; current public mainline uses YOLO26 | react-native-scanner-sdk | Accepted artifact and SDK qualification Issue |
 | Heterogeneous CPU/GPU scheduling | SDK [#381](https://github.com/shapovalovei/react-native-scanner-sdk/issues/381) is open research | react-native-scanner-sdk | Real delegate evidence and performance requirement |
+
+## Rollout / phase status
+
+| Phase | Status |
+|---|---|
+| Framework behavioral stabilization | Complete |
+| CUDA assignment validation | Complete / Verdict A |
+| Framework documentation handoff | This PR |
+| Downstream training | Future, separately authorized; not started here |
+| Downstream export/SDK | Only after a concrete artifact decision and qualification |
 
 ## Recommended rollout sequence
 
