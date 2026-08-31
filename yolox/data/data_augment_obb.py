@@ -49,6 +49,22 @@ def box_candidates(box1, box2, wh_thr=2, ar_thr=20, area_thr=0.2):
     )  # candidates
 
 
+def _valid_obb_target_mask(boxes, angles, min_size=None):
+    """Return finite, positive-dimension OBB targets that may continue.
+
+    ``min_size`` is supplied only after image resizing by ``TrainTransformOBB``;
+    source augmentation rejects malformed geometry without moving the policy
+    threshold before the maintained resize step.
+    """
+    boxes = np.asarray(boxes)
+    angles = np.asarray(angles)
+    valid = np.isfinite(boxes).all(axis=1) & np.isfinite(angles)
+    valid &= (boxes[:, 2] > 0.0) & (boxes[:, 3] > 0.0)
+    if min_size is not None:
+        valid &= np.minimum(boxes[:, 2], boxes[:, 3]) > min_size
+    return valid
+
+
 def obb_to_corners(center_x, center_y, width, height, angle):
     """Decode the fork's (cx, cy, long_w, short_h, angle_deg) contract."""
     radians = math.radians(float(angle))
@@ -250,6 +266,13 @@ def random_perspective(
     # with xyxy2cxcywh; they are not axis-aligned polygon corners.
     n = len(targets)
     if n:
+        # Reject malformed source geometry before corner reconstruction.  The
+        # post-resize minimum-size policy remains in TrainTransformOBB below.
+        source_boxes = xyxy2cxcywh(targets[:, :4].copy())
+        source_valid = _valid_obb_target_mask(source_boxes, targets[:, 4])
+        targets = targets[source_valid]
+        n = len(targets)
+    if n:
         source_corners = np.asarray(
             [_obb_target_to_corners(target) for target in targets], dtype=np.float64
         )
@@ -433,7 +456,7 @@ class TrainTransformOBB:
         boxes = xyxy2cxcywh(boxes) #[c_x,c_y,w,h]
         boxes *= r_ #缩放boxes
 
-        mask_b = np.minimum(boxes[:, 2], boxes[:, 3]) > 4 #如果bbox的长或者宽小于8，那么忽略这个bbox
+        mask_b = _valid_obb_target_mask(boxes, angles, min_size=4)
         boxes_t = boxes[mask_b]
         labels_t = labels[mask_b]
         angles_t = angles[mask_b] #add
@@ -441,9 +464,10 @@ class TrainTransformOBB:
         if len(boxes_t) == 0:
             image_t, r_o = preproc(image_o, input_dim, self.means, self.std)
             boxes_o *= r_o
-            boxes_t = boxes_o
-            labels_t = labels_o
-            angles_t = angles_o #add
+            mask_o = _valid_obb_target_mask(boxes_o, angles_o, min_size=4)
+            boxes_t = boxes_o[mask_o]
+            labels_t = labels_o[mask_o]
+            angles_t = angles_o[mask_o] #add
 
         labels_t = np.expand_dims(labels_t, 1)
         angles_t = np.expand_dims(angles_t, 1) #add

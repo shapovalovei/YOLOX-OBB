@@ -16,6 +16,16 @@ from yolox.models import compute_kld_loss, KLDloss
 from .network_blocks import BaseConv, DWConv
 
 
+def _valid_obb_label_mask(labels):
+    """Identify populated padded labels with finite, positive OBB geometry."""
+    required = labels[..., :6]
+    return (
+        torch.isfinite(required).all(dim=2)
+        & (required[..., 3] > 0.0)
+        & (required[..., 4] > 0.0)
+    )
+
+
 
 
 class YOLOXHeadOBB_KLD(nn.Module):
@@ -305,12 +315,9 @@ class YOLOXHeadOBB_KLD(nn.Module):
         obj_preds = outputs[:, :, 5].unsqueeze(-1)  # [batch, n_anchors_all, 1]
         cls_preds = outputs[:, :, 6:]  # [batch, n_anchors_all, n_cls]
 
-        mixup = labels.shape[2] > 6 #default 5
-        if mixup:
-            label_cut = labels[..., :6] #default 5
-        else:
-            label_cut = labels
-        nlabel = (label_cut.sum(dim=2) > 0).sum(dim=1)  # number of objects
+        label_cut = labels[..., :6]
+        valid_label_mask = _valid_obb_label_mask(label_cut)
+        nlabel = valid_label_mask.sum(dim=1)  # number of valid objects
 
 
         total_num_anchors = outputs.shape[1]
@@ -341,9 +348,10 @@ class YOLOXHeadOBB_KLD(nn.Module):
                 obj_target = outputs.new_zeros((total_num_anchors, 1))
                 fg_mask = outputs.new_zeros(total_num_anchors).bool()
             else:
-                gt_bboxes_per_image = labels[batch_idx, :num_gt, 1:5]
-                gt_angles_per_image = labels[batch_idx, :num_gt, 5]  # add
-                gt_classes = labels[batch_idx, :num_gt, 0]
+                labels_per_image = labels[batch_idx][valid_label_mask[batch_idx]]
+                gt_bboxes_per_image = labels_per_image[:, 1:5]
+                gt_angles_per_image = labels_per_image[:, 5]  # add
+                gt_classes = labels_per_image[:, 0]
                 bboxes_preds_per_image = bbox_preds[batch_idx]
                 angles_preds_per_image = angle_preds[batch_idx]
 
