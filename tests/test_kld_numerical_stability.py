@@ -63,6 +63,25 @@ def legacy_kld_loss(pred, target, taf=1.0):
     return 1 - 1 / (taf + torch.log(kld + 1))
 
 
+def fp64_decode_chain_reference(raw_value, target_values, stride=8.0, taf=1.0):
+    """Evaluate the unchanged KLD/decode chain in FP64 for validation only."""
+    raw = torch.tensor(raw_value, dtype=torch.float64, requires_grad=True)
+    decoded_width = torch.exp(raw) * stride
+    prediction = torch.stack(
+        (
+            torch.tensor(100.0, dtype=torch.float64),
+            torch.tensor(80.0, dtype=torch.float64),
+            decoded_width,
+            torch.tensor(10.0, dtype=torch.float64),
+            torch.tensor(15.0, dtype=torch.float64),
+        )
+    ).unsqueeze(0)
+    target = torch.tensor([target_values], dtype=torch.float64)
+    output = legacy_kld_loss(prediction, target, taf=taf)
+    output.sum().backward()
+    return decoded_width.detach(), output.detach(), raw.grad.detach()
+
+
 class KLDNumericalStabilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -77,9 +96,94 @@ class KLDNumericalStabilityTests(unittest.TestCase):
         output.sum().backward()
         return output.detach(), prediction.grad.detach()
 
+    def evaluate_decode_chain(self, raw_value, dtype=torch.float32):
+        raw = torch.tensor(raw_value, dtype=dtype, requires_grad=True)
+        decoded_width = torch.exp(raw) * 8.0
+        prediction = torch.stack(
+            (
+                torch.tensor(100.0, dtype=dtype),
+                torch.tensor(80.0, dtype=dtype),
+                decoded_width,
+                torch.tensor(10.0, dtype=dtype),
+                torch.tensor(15.0, dtype=dtype),
+            )
+        ).unsqueeze(0)
+        target = torch.tensor(
+            [[100.0, 80.0, 40.0, 10.0, 15.0]], dtype=dtype
+        )
+        output = self.kld.KLDloss()(prediction, target)
+        output.sum().backward()
+        return decoded_width.detach(), output.detach(), raw.grad.detach()
+
+    def assert_decode_chain_matches_fp64(self, raw_values):
+        for raw_value in raw_values:
+            decoded, output, raw_gradient = self.evaluate_decode_chain(raw_value)
+            _, reference_output, reference_gradient = fp64_decode_chain_reference(
+                raw_value,
+                [100.0, 80.0, 40.0, 10.0, 15.0],
+            )
+            self.assertTrue(
+                torch.isfinite(output).all(),
+                (raw_value, decoded, output, raw_gradient),
+            )
+            self.assertTrue(
+                torch.isfinite(raw_gradient).all(),
+                (raw_value, decoded, output, raw_gradient),
+            )
+            self.assertNotEqual(
+                float(raw_gradient), 0.0,
+                (raw_value, decoded, output, raw_gradient),
+            )
+            self.assertTrue(torch.isfinite(reference_output).all())
+            self.assertTrue(torch.isfinite(reference_gradient).all())
+            self.assertTrue(
+                torch.allclose(output.double(), reference_output, rtol=2e-5, atol=2e-7),
+                (raw_value, output, reference_output),
+            )
+            self.assertTrue(
+                torch.allclose(
+                    raw_gradient.double(), reference_gradient, rtol=2e-5, atol=2e-8
+                ),
+                (raw_value, raw_gradient, reference_gradient),
+            )
+
+    def test_decode_chain_small_finite_predictions_retain_reference_gradient(self):
+        self.assert_decode_chain_matches_fp64([-88.0, -89.0, -89.4, -90.0, -92.0])
+
+    def test_decode_chain_large_finite_predictions_retain_reference_gradient(self):
+        self.assert_decode_chain_matches_fp64([43.0, 44.0, 44.5, 45.0, 46.0])
+
+    def test_decode_chain_distinguishes_normal_subnormal_and_exact_zero(self):
+        normal, normal_output, normal_gradient = self.evaluate_decode_chain(-80.0)
+        subnormal, subnormal_output, subnormal_gradient = self.evaluate_decode_chain(
+            -90.0
+        )
+        exact_zero, exact_zero_output, exact_zero_gradient = self.evaluate_decode_chain(
+            -104.0
+        )
+        self.assertGreaterEqual(float(normal), torch.finfo(torch.float32).tiny)
+        self.assertGreater(float(subnormal), 0.0)
+        self.assertLess(float(subnormal), torch.finfo(torch.float32).tiny)
+        self.assertEqual(float(exact_zero), 0.0)
+        self.assertTrue(torch.isfinite(normal_output).all())
+        self.assertTrue(torch.isfinite(normal_gradient).all())
+        self.assertTrue(torch.isfinite(subnormal_output).all())
+        self.assertTrue(torch.isfinite(subnormal_gradient).all())
+        self.assertEqual(float(exact_zero_output), 1.0)
+        self.assertTrue(torch.isfinite(exact_zero_gradient).all())
+        self.assertEqual(float(exact_zero_gradient), 0.0)
+
     def test_fp32_tiny_prediction_has_finite_forward_and_gradient(self):
         output, gradient = self.evaluate(
             [100.0, 80.0, 9.313225746154785e-10, 10.0, 15.0],
+            [100.0, 80.0, 40.0, 10.0, 15.0],
+        )
+        self.assertTrue(torch.isfinite(output).all())
+        self.assertTrue(torch.isfinite(gradient).all())
+
+    def test_fp32_both_tiny_prediction_dimensions_have_finite_gradient(self):
+        output, gradient = self.evaluate(
+            [100.0, 80.0, 2.0 ** -30, 2.0 ** -30, 15.0],
             [100.0, 80.0, 40.0, 10.0, 15.0],
         )
         self.assertTrue(torch.isfinite(output).all())
@@ -110,7 +214,7 @@ class KLDNumericalStabilityTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(gradient).all())
         self.assertAlmostEqual(float(output), 0.0, places=6)
 
-    def test_decoded_zero_prediction_is_conditioned_without_repairing_negative(self):
+    def test_decoded_zero_prediction_uses_finite_limit_without_repairing_negative(self):
         output, gradient = self.evaluate(
             [100.0, 80.0, 0.0, 10.0, 15.0],
             [100.0, 80.0, 40.0, 10.0, 15.0],
@@ -222,6 +326,12 @@ class KLDNumericalStabilityTests(unittest.TestCase):
             ([100.0, 80.0, 8.0, 4.0, 90.0], [100.0, 80.0, 40.0, 10.0, -89.0]),
             ([106.0, 77.0, 256.0, 256.0, 0.0], [100.0, 80.0, 40.0, 10.0, 15.0]),
             ([106.0, 77.0, 500.0, 3.0, -89.0], [100.0, 80.0, 40.0, 10.0, 15.0]),
+            ([50.0, 60.0, 8.0, 4.0, -30.0], [50.0, 60.0, 8.0, 4.0, -30.0]),
+            ([320.0, 200.0, 500.0, 3.0, 89.0], [320.0, 200.0, 500.0, 3.0, 89.0]),
+            ([100.0, 80.0, 256.0, 256.0, 0.0], [100.0, 80.0, 256.0, 256.0, 0.0]),
+            ([120.0, 40.0, 12.0, 10.0, -45.0], [100.0, 80.0, 40.0, 10.0, 15.0]),
+            ([20.0, 200.0, 1024.0, 768.0, 60.0], [100.0, 80.0, 40.0, 10.0, 15.0]),
+            ([70.0, 95.0, 2.0, 3.0, 5.0], [15.0, 15.0, 12.0, 10.0, -90.0]),
         ]
 
         for dtype in (torch.float64, torch.float32):
@@ -259,6 +369,25 @@ class KLDNumericalStabilityTests(unittest.TestCase):
                         candidate_prediction.grad,
                     ),
                 )
+
+    def test_ordinary_prediction_gradient_passes_gradcheck(self):
+        prediction = torch.tensor(
+            [[106.0, 77.0, 52.0, 8.0, -25.0]],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        target = torch.tensor(
+            [[100.0, 80.0, 40.0, 10.0, 15.0]], dtype=torch.float64
+        )
+        self.assertTrue(
+            torch.autograd.gradcheck(
+                lambda value: self.kld.kld_loss(value, target),
+                (prediction,),
+                eps=1e-6,
+                atol=1e-5,
+                rtol=1e-4,
+            )
+        )
 
 
 if __name__ == "__main__":
