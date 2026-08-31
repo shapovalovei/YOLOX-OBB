@@ -274,7 +274,10 @@ class YOLOXHeadOBB_KLD(nn.Module):
         )
         grid = grid.view(1, -1, 2) # grid: shape(1, hsize * wsize, 2)
         output[..., :2] = (output[..., :2] + grid) * stride
-        output[..., 2:4] = torch.exp(output[..., 2:4]) * stride
+        # Fold the scalar stride into the exponent so backward avoids forming
+        # an overflowing decoded-gradient * stride intermediate for subnormal
+        # dimensions.  The Python scalar preserves output dtype and device.
+        output[..., 2:4] = torch.exp(output[..., 2:4] + math.log(float(stride)))
         output[..., 4] = (output[..., 4].sigmoid() - 0.5) * 180 #add
         return output, grid
 
