@@ -1,0 +1,5 @@
+include DOTA_devkit_YOLO/polyiou.cpp
+include DOTA_devkit_YOLO/polyiou.h
+include DOTA_devkit_YOLO/polyiou.i
+include DOTA_devkit_YOLO/polyiou_wrap.cxx
+recursive-include yolox/layers/csrc *.cpp *.h
