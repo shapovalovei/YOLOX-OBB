@@ -88,6 +88,9 @@ class _Model:
         self.train_calls += 1
         return self
 
+    def state_dict(self):
+        return {}
+
 
 class _TensorBoard:
     def __init__(self):
@@ -119,6 +122,7 @@ def _lifecycle_trainer(module, exp, epoch):
     trainer = object.__new__(module.Trainer)
     trainer.use_model_ema = False
     trainer.model = _Model()
+    trainer.optimizer = SimpleNamespace(state_dict=lambda: {})
     trainer.rank = 0
     trainer.epoch = epoch
     trainer.evaluator = object()

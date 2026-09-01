@@ -30,6 +30,7 @@ class _CheckpointModel(torch.nn.Module):
     def __init__(self, value):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.tensor([value], dtype=torch.float32))
+        self.register_buffer("norm", torch.tensor([value], dtype=torch.float32))
 
 
 def _load_maintained_save_checkpoint():
@@ -281,6 +282,79 @@ class TrainerCheckpointStateTests(unittest.TestCase):
             resumed.resume_train(resumed.model)
 
             self.assertEqual(resumed.start_epoch, 8)
+            self.assertEqual(resumed.best_ap, 0.9)
+            self.assertTrue(resumed.best_ap_available)
+
+    def test_after_epoch_preserves_pre_evaluation_model_snapshots_with_current_latest_metadata(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            trainer = _trainer(
+                self.trainer_module,
+                directory,
+                best_ap=0.8,
+                best_ap_available=True,
+            )
+
+            trainer.exp = SimpleNamespace(
+                eval_interval=1,
+                save_interval=1,
+                eval=mock.Mock(return_value=(0.9, 0.8, "numeric timing")),
+            )
+            trainer.evaluator = object()
+            trainer.is_distributed = False
+            trainer.tblogger = _TensorBoard()
+            save_ckpt = mock.Mock(wraps=trainer.save_ckpt)
+            trainer.save_ckpt = save_ckpt
+
+            with mock.patch.object(
+                self.trainer_module,
+                "all_reduce_norm",
+                side_effect=lambda model: model.norm.fill_(9.0),
+            ) as all_reduce_norm:
+                trainer.after_epoch()
+
+            all_reduce_norm.assert_called_once_with(trainer.model)
+            trainer.exp.eval.assert_called_once()
+            self.assertEqual(
+                save_ckpt.call_args_list,
+                [
+                    mock.call(ckpt_name="latest"),
+                    mock.call(ckpt_name="8_epoch"),
+                    mock.call("last_epoch", True),
+                ],
+            )
+            latest_state = torch.load(
+                directory / "latest_ckpt.pth", map_location="cpu"
+            )
+            periodic_state = torch.load(
+                directory / "8_epoch_ckpt.pth", map_location="cpu"
+            )
+            last_epoch_state = torch.load(
+                directory / "last_epoch_ckpt.pth", map_location="cpu"
+            )
+            best_state = torch.load(directory / "best_ckpt.pth", map_location="cpu")
+
+            self.assertEqual(latest_state["model"]["norm"].item(), 2.0)
+            self.assertEqual(periodic_state["model"]["norm"].item(), 2.0)
+            self.assertEqual(last_epoch_state["model"]["norm"].item(), 9.0)
+            self.assertEqual(best_state["model"]["norm"].item(), 9.0)
+            self.assertEqual(latest_state["best_ap"], 0.9)
+            self.assertTrue(latest_state["best_ap_available"])
+
+            resumed = _trainer(
+                self.trainer_module,
+                directory,
+                best_ap=42,
+                best_ap_available=True,
+            )
+            resumed.args = SimpleNamespace(
+                resume=True,
+                ckpt=None,
+                start_epoch=None,
+            )
+            resumed.resume_train(resumed.model)
+
+            self.assertEqual(resumed.model.norm.item(), 2.0)
             self.assertEqual(resumed.best_ap, 0.9)
             self.assertTrue(resumed.best_ap_available)
 

@@ -2,6 +2,7 @@
 # -*- coding:utf-8 -*-
 # Copyright (c) Megvii, Inc. and its affiliates.
 
+import copy
 import datetime
 import os
 import time
@@ -244,16 +245,31 @@ class Trainer:
                 self.save_ckpt(ckpt_name="last_mosaic_epoch")
 
     def after_epoch(self):
+        checkpoint_states = None
         update_best_ckpt = None
         if (self.epoch + 1) % self.exp.eval_interval == 0:
+            save_model = self.ema_model.ema if self.use_model_ema else self.model
+            checkpoint_states = (
+                copy.deepcopy(save_model.state_dict()),
+                copy.deepcopy(self.optimizer.state_dict()),
+            )
             all_reduce_norm(self.model)
             update_best_ckpt = self.evaluate_and_save_model(save_checkpoint=False)
 
-        self.save_ckpt(ckpt_name="latest")
-        ##add##
-        save_interval = getattr(self.exp, "save_interval", None)
-        if save_interval is not None and (self.epoch + 1) % save_interval == 0:
-            self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
+        if checkpoint_states is not None:
+            self._checkpoint_model_state, self._checkpoint_optimizer_state = (
+                checkpoint_states
+            )
+        try:
+            self.save_ckpt(ckpt_name="latest")
+            ##add##
+            save_interval = getattr(self.exp, "save_interval", None)
+            if save_interval is not None and (self.epoch + 1) % save_interval == 0:
+                self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
+        finally:
+            if checkpoint_states is not None:
+                del self._checkpoint_model_state
+                del self._checkpoint_optimizer_state
 
         if update_best_ckpt is not None:
             self.save_ckpt("last_epoch", update_best_ckpt)
@@ -390,10 +406,16 @@ class Trainer:
         if self.rank == 0:
             save_model = self.ema_model.ema if self.use_model_ema else self.model
             logger.info("Save weights to {}".format(self.file_name))
+            model_state = getattr(self, "_checkpoint_model_state", None)
+            optimizer_state = getattr(self, "_checkpoint_optimizer_state", None)
             ckpt_state = {
                 "start_epoch": self.epoch + 1,
-                "model": save_model.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
+                "model": save_model.state_dict() if model_state is None else model_state,
+                "optimizer": (
+                    self.optimizer.state_dict()
+                    if optimizer_state is None
+                    else optimizer_state
+                ),
                 "best_ap": self.best_ap,
                 "best_ap_available": self.best_ap_available,
             }
