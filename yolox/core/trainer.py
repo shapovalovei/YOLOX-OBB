@@ -17,6 +17,7 @@ from yolox.utils import (
     MeterBuffer,
     ModelEMA,
     all_reduce_norm,
+    get_async_norm_states,
     get_local_rank,
     get_model_info,
     get_rank,
@@ -244,15 +245,32 @@ class Trainer:
                 self.save_ckpt(ckpt_name="last_mosaic_epoch")
 
     def after_epoch(self):
-        self.save_ckpt(ckpt_name="latest")
-        ##add##
-        save_interval = getattr(self.exp, "save_interval", None)
-        if save_interval is not None and (self.epoch + 1) % save_interval == 0:
-            self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
+        checkpoint_norm_states = None
+        update_best_ckpt = None
+        try:
+            if (self.epoch + 1) % self.exp.eval_interval == 0:
+                save_model = self.ema_model.ema if self.use_model_ema else self.model
+                checkpoint_norm_states = {
+                    key: value.detach().cpu().clone()
+                    for key, value in get_async_norm_states(save_model).items()
+                }
+                all_reduce_norm(self.model)
+                update_best_ckpt = self.evaluate_and_save_model(save_checkpoint=False)
+        finally:
+            if checkpoint_norm_states is not None:
+                self._checkpoint_norm_states = checkpoint_norm_states
+            try:
+                self.save_ckpt(ckpt_name="latest")
+                ##add##
+                save_interval = getattr(self.exp, "save_interval", None)
+                if save_interval is not None and (self.epoch + 1) % save_interval == 0:
+                    self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
+            finally:
+                if checkpoint_norm_states is not None:
+                    del self._checkpoint_norm_states
 
-        if (self.epoch + 1) % self.exp.eval_interval == 0:
-            all_reduce_norm(self.model)
-            self.evaluate_and_save_model()
+        if update_best_ckpt is not None:
+            self.save_ckpt("last_epoch", update_best_ckpt)
 
     def before_iter(self):
         pass
@@ -320,6 +338,12 @@ class Trainer:
             # resume the training states variables
             if self.amp_training and "amp" in ckpt:
                 amp.load_state_dict(ckpt["amp"])
+            if "best_ap" in ckpt and "best_ap_available" in ckpt:
+                self.best_ap = ckpt["best_ap"]
+                self.best_ap_available = ckpt["best_ap_available"]
+            else:
+                self.best_ap = 0
+                self.best_ap_available = False
             start_epoch = (
                 self.args.start_epoch - 1
                 if self.args.start_epoch is not None
@@ -341,7 +365,7 @@ class Trainer:
 
         return model
 
-    def evaluate_and_save_model(self):
+    def evaluate_and_save_model(self, save_checkpoint=True):
         if self.use_model_ema:
             evalmodel = self.ema_model.ema
         else:
@@ -366,20 +390,30 @@ class Trainer:
             logger.info("\n" + summary)
         synchronize()
 
-        update_best_ckpt = has_metrics and ap50_95 > self.best_ap
-        self.save_ckpt("last_epoch", update_best_ckpt)
         if has_metrics:
+            update_best_ckpt = ap50_95 > self.best_ap
             self.best_ap_available = True
             self.best_ap = max(self.best_ap, ap50_95)
+        else:
+            update_best_ckpt = False
+        if save_checkpoint:
+            self.save_ckpt("last_epoch", update_best_ckpt)
+        return update_best_ckpt
 
     def save_ckpt(self, ckpt_name, update_best_ckpt=False):
         if self.rank == 0:
             save_model = self.ema_model.ema if self.use_model_ema else self.model
             logger.info("Save weights to {}".format(self.file_name))
+            model_state = save_model.state_dict()
+            checkpoint_norm_states = getattr(self, "_checkpoint_norm_states", None)
+            if checkpoint_norm_states is not None:
+                model_state.update(checkpoint_norm_states)
             ckpt_state = {
                 "start_epoch": self.epoch + 1,
-                "model": save_model.state_dict(),
+                "model": model_state,
                 "optimizer": self.optimizer.state_dict(),
+                "best_ap": self.best_ap,
+                "best_ap_available": self.best_ap_available,
             }
             if self.amp_training:
                 # save amp state according to

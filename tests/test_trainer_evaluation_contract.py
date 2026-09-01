@@ -31,6 +31,7 @@ def _load_trainer():
     utils_stub.MeterBuffer = object
     utils_stub.ModelEMA = object
     utils_stub.all_reduce_norm = lambda *args: None
+    utils_stub.get_async_norm_states = lambda *args: {}
     utils_stub.get_local_rank = lambda: 0
     utils_stub.get_model_info = lambda *args: ""
     utils_stub.get_rank = lambda: 0
@@ -87,7 +88,6 @@ class _Model:
     def train(self):
         self.train_calls += 1
         return self
-
 
 class _TensorBoard:
     def __init__(self):
