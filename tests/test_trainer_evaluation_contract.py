@@ -1,4 +1,4 @@
-"""Regression coverage for numeric and writer-only trainer evaluation results."""
+"""Regression coverage for trainer evaluation and checkpoint lifecycle contracts."""
 
 import importlib.util
 import sys
@@ -115,6 +115,31 @@ def _trainer(module, evaluation_result):
     return trainer
 
 
+def _lifecycle_trainer(module, exp, epoch):
+    trainer = object.__new__(module.Trainer)
+    trainer.use_model_ema = False
+    trainer.model = _Model()
+    trainer.rank = 0
+    trainer.epoch = epoch
+    trainer.evaluator = object()
+    trainer.is_distributed = False
+    trainer.tblogger = _TensorBoard()
+    trainer.best_ap = 0.5
+    trainer.best_ap_available = False
+    trainer.save_ckpt = mock.Mock()
+    trainer.exp = exp
+    return trainer
+
+
+def _hbb_exp(eval_interval):
+    from yolox.exp.yolox_base import Exp
+
+    exp = Exp()
+    exp.eval_interval = eval_interval
+    exp.eval = mock.Mock(return_value=(0.75, 0.8, "numeric timing"))
+    return exp
+
+
 class TrainerEvaluationContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -154,6 +179,107 @@ class TrainerEvaluationContractTests(unittest.TestCase):
                 for message in self.trainer_module.logger.messages
             )
         )
+
+
+class TrainerCheckpointLifecycleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.trainer_module = _load_trainer()
+
+    def test_missing_save_interval_keeps_latest_and_skips_periodic_save(self):
+        exp = _hbb_exp(eval_interval=6)
+        trainer = _lifecycle_trainer(self.trainer_module, exp, epoch=1)
+
+        trainer.after_epoch()
+
+        self.assertEqual(trainer.save_ckpt.call_args_list, [mock.call(ckpt_name="latest")])
+        exp.eval.assert_not_called()
+
+    def test_missing_save_interval_preserves_evaluation_save(self):
+        exp = _hbb_exp(eval_interval=3)
+        trainer = _lifecycle_trainer(self.trainer_module, exp, epoch=2)
+
+        trainer.after_epoch()
+
+        self.assertEqual(
+            trainer.save_ckpt.call_args_list,
+            [mock.call(ckpt_name="latest"), mock.call("last_epoch", True)],
+        )
+        exp.eval.assert_called_once()
+
+    def test_missing_save_interval_preserves_final_epoch_evaluation(self):
+        exp = _hbb_exp(eval_interval=3)
+        trainer = _lifecycle_trainer(self.trainer_module, exp, epoch=2)
+        trainer.max_epoch = 3
+
+        trainer.after_epoch()
+
+        self.assertEqual(
+            trainer.save_ckpt.call_args_list,
+            [mock.call(ckpt_name="latest"), mock.call("last_epoch", True)],
+        )
+        exp.eval.assert_called_once()
+
+    def test_explicit_save_interval_preserves_nonmatching_and_matching_epochs(self):
+        nonmatching_exp = _hbb_exp(eval_interval=6)
+        nonmatching_exp.save_interval = 3
+        nonmatching_trainer = _lifecycle_trainer(
+            self.trainer_module, nonmatching_exp, epoch=1
+        )
+
+        nonmatching_trainer.after_epoch()
+
+        self.assertEqual(
+            nonmatching_trainer.save_ckpt.call_args_list,
+            [mock.call(ckpt_name="latest")],
+        )
+        nonmatching_exp.eval.assert_not_called()
+
+        matching_exp = _hbb_exp(eval_interval=6)
+        matching_exp.save_interval = 3
+        matching_trainer = _lifecycle_trainer(self.trainer_module, matching_exp, epoch=2)
+
+        matching_trainer.after_epoch()
+
+        self.assertEqual(
+            matching_trainer.save_ckpt.call_args_list,
+            [mock.call(ckpt_name="latest"), mock.call(ckpt_name="3_epoch")],
+        )
+        matching_exp.eval.assert_not_called()
+
+    def test_explicit_save_interval_preserves_evaluation_and_periodic_save(self):
+        exp = _hbb_exp(eval_interval=3)
+        exp.save_interval = 3
+        trainer = _lifecycle_trainer(self.trainer_module, exp, epoch=2)
+
+        trainer.after_epoch()
+
+        self.assertEqual(
+            trainer.save_ckpt.call_args_list,
+            [
+                mock.call(ckpt_name="latest"),
+                mock.call(ckpt_name="3_epoch"),
+                mock.call("last_epoch", True),
+            ],
+        )
+        exp.eval.assert_called_once()
+
+    def test_obb_save_interval_cadence_is_unchanged(self):
+        from yolox.exp.yolox_base_obb_kld import ExpOBB_KLD
+
+        exp = ExpOBB_KLD()
+        exp.eval_interval = 999
+        exp.eval = mock.Mock(return_value=(0.75, 0.8, "numeric timing"))
+        trainer = _lifecycle_trainer(self.trainer_module, exp, epoch=9)
+
+        trainer.after_epoch()
+
+        self.assertEqual(exp.save_interval, 10)
+        self.assertEqual(
+            trainer.save_ckpt.call_args_list,
+            [mock.call(ckpt_name="latest"), mock.call(ckpt_name="10_epoch")],
+        )
+        exp.eval.assert_not_called()
 
 
 if __name__ == "__main__":
