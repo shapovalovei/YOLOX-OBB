@@ -15,6 +15,23 @@ from .losses import IOUloss
 from .network_blocks import BaseConv, DWConv
 
 
+_LEGACY_CUDA_OOM_PREFIXES = (
+    "CUDA out of memory",
+    "CUDA error: out of memory",
+)
+
+
+def _is_cuda_oom(exc):
+    """Return whether *exc* is a CUDA OOM accepted by assignment fallback."""
+    cuda_oom_error = getattr(torch.cuda, "OutOfMemoryError", None)
+    if cuda_oom_error is not None and isinstance(exc, cuda_oom_error):
+        return True
+
+    return type(exc) is RuntimeError and str(exc).startswith(
+        _LEGACY_CUDA_OOM_PREFIXES
+    )
+
+
 class YOLOXHead(nn.Module):
     def __init__(
         self,
@@ -326,7 +343,9 @@ class YOLOXHead(nn.Module):
                         labels,
                         imgs,
                     )
-                except RuntimeError:
+                except RuntimeError as exc:
+                    if not _is_cuda_oom(exc):
+                        raise
                     logger.error(
                         "OOM RuntimeError is raised due to the huge memory cost during label assignment. \
                            CPU mode is applied in this batch. If you want to avoid this issue, \
