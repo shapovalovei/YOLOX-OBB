@@ -20,7 +20,11 @@ def _log_positive(value):
     return torch.where(
         positive,
         logged,
-        torch.where(zero, torch.full_like(value, -torch.inf), torch.full_like(value, torch.nan)),
+        torch.where(
+            zero,
+            torch.full_like(value, float("-inf")),
+            torch.full_like(value, float("nan")),
+        ),
     )
 
 
@@ -30,7 +34,7 @@ def _log_abs_nonzero(value):
     nonzero = absolute > 0.0
     safe_absolute = torch.where(nonzero, absolute, torch.ones_like(absolute))
     logged = torch.log(safe_absolute)
-    return torch.where(nonzero, logged, torch.full_like(value, -torch.inf))
+    return torch.where(nonzero, logged, torch.full_like(value, float("-inf")))
 
 
 def _log_squared_abs(value):
@@ -51,7 +55,7 @@ def _log_positive_sum_with_signed_term(log_positive_sum, signed_term):
     log_signed_term = torch.where(
         positive_signed_term,
         torch.log(safe_signed_term),
-        torch.full_like(signed_term, -torch.inf),
+        torch.full_like(signed_term, float("-inf")),
     )
     negative_signed_term = signed_term < 0.0
     safe_abs_signed_term = torch.where(
@@ -60,7 +64,7 @@ def _log_positive_sum_with_signed_term(log_positive_sum, signed_term):
     log_abs_signed_term = torch.where(
         negative_signed_term,
         torch.log(safe_abs_signed_term),
-        torch.full_like(signed_term, -torch.inf),
+        torch.full_like(signed_term, float("-inf")),
     )
 
     # Around ordinary values, retain the derivative at signed_term == 0 by
@@ -83,8 +87,8 @@ def _log_positive_sum_with_signed_term(log_positive_sum, signed_term):
         direct_signed_term / direct_positive_sum
     )
 
-    positive_infinite_limit = torch.isneginf(log_positive_sum) & torch.isposinf(
-        signed_term
+    positive_infinite_limit = (log_positive_sum == float("-inf")) & (
+        signed_term == float("inf")
     )
     safe_log_positive_sum = torch.where(
         positive_infinite_limit, torch.zeros_like(log_positive_sum), log_positive_sum
@@ -94,7 +98,9 @@ def _log_positive_sum_with_signed_term(log_positive_sum, signed_term):
     )
     log_plus_raw = torch.logaddexp(safe_log_positive_sum, safe_log_signed_term)
     log_plus = torch.where(
-        positive_infinite_limit, torch.full_like(log_plus_raw, torch.inf), log_plus_raw
+        positive_infinite_limit,
+        torch.full_like(log_plus_raw, float("inf")),
+        log_plus_raw,
     )
     # For valid positive dimensions, P + L = KLD + 1 >= 1.  Therefore when
     # L is negative, exp(log_abs(L) - log(P)) is strictly below one and this
@@ -104,7 +110,7 @@ def _log_positive_sum_with_signed_term(log_positive_sum, signed_term):
     )
     safe_log_abs_signed_term = torch.where(
         positive_infinite_limit,
-        torch.full_like(log_abs_signed_term, -torch.inf),
+        torch.full_like(log_abs_signed_term, float("-inf")),
         log_abs_signed_term,
     )
     log_minus_raw = safe_log_positive_sum + torch.log1p(
@@ -115,7 +121,9 @@ def _log_positive_sum_with_signed_term(log_positive_sum, signed_term):
     )
     log_domain = torch.where(signed_term >= 0.0, log_plus, log_minus)
     result = torch.where(materializable, direct, log_domain)
-    return torch.where(torch.isnan(signed_term), torch.full_like(result, torch.nan), result)
+    return torch.where(
+        torch.isnan(signed_term), torch.full_like(result, float("nan")), result
+    )
 
 
 def _compute_kld_loss(pred, target, taf):
@@ -173,13 +181,13 @@ def _compute_kld_loss(pred, target, taf):
         ),
         dim=0,
     )
-    all_terms_zero = torch.isneginf(log_p_terms).all(dim=0)
+    all_terms_zero = (log_p_terms == float("-inf")).all(dim=0)
     safe_log_p_terms = torch.where(
         all_terms_zero.unsqueeze(0), torch.zeros_like(log_p_terms), log_p_terms
     )
     log_p_raw = torch.logsumexp(safe_log_p_terms, dim=0)
     log_p = torch.where(
-        all_terms_zero, torch.full_like(log_p_raw, -torch.inf), log_p_raw
+        all_terms_zero, torch.full_like(log_p_raw, float("-inf")), log_p_raw
     )
 
     # In exact arithmetic, the old log-ratio expression is exactly L below.
