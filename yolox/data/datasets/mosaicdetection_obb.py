@@ -85,7 +85,7 @@ class MosaicDetectionOBB(Dataset):
     def __getitem__(self, idx):
         if self.enable_mosaic:
             mosaic_labels = []
-            input_dim = self._dataset.input_dim
+            input_dim = self.input_dim
             input_h, input_w = input_dim[0], input_dim[1]
 
             # yc, xc = s, s  # mosaic center x, y
