@@ -437,6 +437,72 @@ class TrainerCheckpointStateTests(unittest.TestCase):
             ):
                 trainer.after_epoch()
 
+    def test_after_epoch_preserves_checkpoints_when_evaluation_boundary_raises(self):
+        for failure_stage in ("all_reduce_norm", "evaluation"):
+            with self.subTest(failure_stage=failure_stage):
+                with tempfile.TemporaryDirectory() as directory_name:
+                    directory = Path(directory_name)
+                    trainer = _trainer(
+                        self.trainer_module,
+                        directory,
+                        best_ap=0.8,
+                        best_ap_available=True,
+                    )
+                    expected_error = RuntimeError(
+                        "{} sentinel".format(failure_stage)
+                    )
+                    evaluation = (
+                        mock.Mock(side_effect=expected_error)
+                        if failure_stage == "evaluation"
+                        else mock.Mock(return_value=(0.9, 0.8, "numeric timing"))
+                    )
+                    trainer.exp = SimpleNamespace(
+                        eval_interval=1,
+                        save_interval=1,
+                        eval=evaluation,
+                    )
+                    trainer.evaluator = object()
+                    trainer.is_distributed = False
+                    trainer.tblogger = _TensorBoard()
+                    save_ckpt = mock.Mock(wraps=trainer.save_ckpt)
+                    trainer.save_ckpt = save_ckpt
+                    if failure_stage == "all_reduce_norm":
+                        reduce_norm = mock.Mock(side_effect=expected_error)
+                    else:
+                        reduce_norm = mock.Mock(
+                            side_effect=lambda model: model.norm.fill_(9.0)
+                        )
+
+                    with mock.patch.object(
+                        self.trainer_module,
+                        "all_reduce_norm",
+                        reduce_norm,
+                    ):
+                        with self.assertRaises(RuntimeError) as raised:
+                            trainer.after_epoch()
+
+                    self.assertIs(raised.exception, expected_error)
+                    reduce_norm.assert_called_once_with(trainer.model)
+                    if failure_stage == "all_reduce_norm":
+                        evaluation.assert_not_called()
+                    else:
+                        evaluation.assert_called_once()
+                    self.assertEqual(
+                        save_ckpt.call_args_list,
+                        [
+                            mock.call(ckpt_name="latest"),
+                            mock.call(ckpt_name="8_epoch"),
+                        ],
+                    )
+                    for name in ("latest_ckpt.pth", "8_epoch_ckpt.pth"):
+                        state = torch.load(directory / name, map_location="cpu")
+                        self.assertEqual(state["model"]["norm"].item(), 2.0)
+                        self.assertEqual(state["best_ap"], 0.8)
+                        self.assertTrue(state["best_ap_available"])
+                    self.assertFalse((directory / "last_epoch_ckpt.pth").exists())
+                    self.assertFalse((directory / "best_ckpt.pth").exists())
+                    self.assertFalse(hasattr(trainer, "_checkpoint_norm_states"))
+
     def test_legacy_checkpoint_missing_either_field_uses_safe_defaults(self):
         for present_fields in ((), ("best_ap",), ("best_ap_available",)):
             with self.subTest(present_fields=present_fields):

@@ -247,26 +247,27 @@ class Trainer:
     def after_epoch(self):
         checkpoint_norm_states = None
         update_best_ckpt = None
-        if (self.epoch + 1) % self.exp.eval_interval == 0:
-            save_model = self.ema_model.ema if self.use_model_ema else self.model
-            checkpoint_norm_states = {
-                key: value.detach().cpu().clone()
-                for key, value in get_async_norm_states(save_model).items()
-            }
-            all_reduce_norm(self.model)
-            update_best_ckpt = self.evaluate_and_save_model(save_checkpoint=False)
-
-        if checkpoint_norm_states is not None:
-            self._checkpoint_norm_states = checkpoint_norm_states
         try:
-            self.save_ckpt(ckpt_name="latest")
-            ##add##
-            save_interval = getattr(self.exp, "save_interval", None)
-            if save_interval is not None and (self.epoch + 1) % save_interval == 0:
-                self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
+            if (self.epoch + 1) % self.exp.eval_interval == 0:
+                save_model = self.ema_model.ema if self.use_model_ema else self.model
+                checkpoint_norm_states = {
+                    key: value.detach().cpu().clone()
+                    for key, value in get_async_norm_states(save_model).items()
+                }
+                all_reduce_norm(self.model)
+                update_best_ckpt = self.evaluate_and_save_model(save_checkpoint=False)
         finally:
             if checkpoint_norm_states is not None:
-                del self._checkpoint_norm_states
+                self._checkpoint_norm_states = checkpoint_norm_states
+            try:
+                self.save_ckpt(ckpt_name="latest")
+                ##add##
+                save_interval = getattr(self.exp, "save_interval", None)
+                if save_interval is not None and (self.epoch + 1) % save_interval == 0:
+                    self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
+            finally:
+                if checkpoint_norm_states is not None:
+                    del self._checkpoint_norm_states
 
         if update_best_ckpt is not None:
             self.save_ckpt("last_epoch", update_best_ckpt)
