@@ -31,6 +31,7 @@ def _load_trainer():
     utils_stub.MeterBuffer = object
     utils_stub.ModelEMA = object
     utils_stub.all_reduce_norm = lambda *args: None
+    utils_stub.get_async_norm_states = lambda *args: {}
     utils_stub.get_local_rank = lambda: 0
     utils_stub.get_model_info = lambda *args: ""
     utils_stub.get_rank = lambda: 0
@@ -88,10 +89,6 @@ class _Model:
         self.train_calls += 1
         return self
 
-    def state_dict(self):
-        return {}
-
-
 class _TensorBoard:
     def __init__(self):
         self.scalars = []
@@ -122,7 +119,6 @@ def _lifecycle_trainer(module, exp, epoch):
     trainer = object.__new__(module.Trainer)
     trainer.use_model_ema = False
     trainer.model = _Model()
-    trainer.optimizer = SimpleNamespace(state_dict=lambda: {})
     trainer.rank = 0
     trainer.epoch = epoch
     trainer.evaluator = object()

@@ -64,6 +64,7 @@ def _load_trainer():
     utils_stub.MeterBuffer = object
     utils_stub.ModelEMA = object
     utils_stub.all_reduce_norm = lambda *args: None
+    utils_stub.get_async_norm_states = lambda model: {"norm": model.norm}
     utils_stub.get_local_rank = lambda: 0
     utils_stub.get_model_info = lambda *args: ""
     utils_stub.get_rank = lambda: 0
@@ -305,6 +306,18 @@ class TrainerCheckpointStateTests(unittest.TestCase):
             trainer.tblogger = _TensorBoard()
             save_ckpt = mock.Mock(wraps=trainer.save_ckpt)
             trainer.save_ckpt = save_ckpt
+            trainer.optimizer.state[trainer.model.weight]["momentum_buffer"] = torch.tensor(
+                [3.0], dtype=torch.float32
+            )
+            optimizer_states = []
+            original_optimizer_state_dict = trainer.optimizer.state_dict
+
+            def capture_optimizer_state():
+                state = original_optimizer_state_dict()
+                optimizer_states.append(state)
+                return state
+
+            trainer.optimizer.state_dict = capture_optimizer_state
 
             with mock.patch.object(
                 self.trainer_module,
@@ -340,6 +353,43 @@ class TrainerCheckpointStateTests(unittest.TestCase):
             self.assertEqual(best_state["model"]["norm"].item(), 9.0)
             self.assertEqual(latest_state["best_ap"], 0.9)
             self.assertTrue(latest_state["best_ap_available"])
+            optimizer_checkpoint_states = [
+                torch.load(directory / name, map_location="cpu")["optimizer"]
+                for name in (
+                    "latest_ckpt.pth",
+                    "8_epoch_ckpt.pth",
+                    "last_epoch_ckpt.pth",
+                )
+            ]
+            first_checkpoint_optimizer_state = optimizer_checkpoint_states[0]
+            for optimizer_state in optimizer_checkpoint_states[1:]:
+                self.assertEqual(
+                    optimizer_state["param_groups"],
+                    first_checkpoint_optimizer_state["param_groups"],
+                )
+                self.assertEqual(
+                    optimizer_state["state"].keys(),
+                    first_checkpoint_optimizer_state["state"].keys(),
+                )
+            momentum_buffer = next(
+                iter(first_checkpoint_optimizer_state["state"].values())
+            )["momentum_buffer"]
+            self.assertTrue(torch.equal(momentum_buffer, torch.tensor([3.0])))
+            self.assertEqual(len(optimizer_states), 3)
+            first_optimizer_state = optimizer_states[0]
+            for optimizer_state in optimizer_states[1:]:
+                self.assertEqual(
+                    optimizer_state["state"].keys(), first_optimizer_state["state"].keys()
+                )
+                for parameter_id in first_optimizer_state["state"]:
+                    self.assertTrue(
+                        torch.equal(
+                            optimizer_state["state"][parameter_id]["momentum_buffer"],
+                            first_optimizer_state["state"][parameter_id]["momentum_buffer"],
+                        )
+                    )
+            self.assertFalse(hasattr(trainer, "_checkpoint_model_state"))
+            self.assertFalse(hasattr(trainer, "_checkpoint_optimizer_state"))
 
             resumed = _trainer(
                 self.trainer_module,
@@ -357,6 +407,35 @@ class TrainerCheckpointStateTests(unittest.TestCase):
             self.assertEqual(resumed.model.norm.item(), 2.0)
             self.assertEqual(resumed.best_ap, 0.9)
             self.assertTrue(resumed.best_ap_available)
+            resumed_optimizer_state = resumed.optimizer.state_dict()
+            resumed_momentum_buffer = next(
+                iter(resumed_optimizer_state["state"].values())
+            )["momentum_buffer"]
+            self.assertTrue(torch.equal(resumed_momentum_buffer, torch.tensor([3.0])))
+
+    def test_after_epoch_does_not_deepcopy_full_checkpoint_state(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            trainer = _trainer(
+                self.trainer_module,
+                directory,
+                best_ap=0.8,
+                best_ap_available=True,
+            )
+            trainer.exp = SimpleNamespace(
+                eval_interval=1,
+                save_interval=99,
+                eval=mock.Mock(return_value=(0.9, 0.8, "numeric timing")),
+            )
+            trainer.evaluator = object()
+            trainer.is_distributed = False
+            trainer.tblogger = _TensorBoard()
+
+            with mock.patch(
+                "copy.deepcopy",
+                side_effect=AssertionError("full checkpoint state deepcopy is forbidden"),
+            ):
+                trainer.after_epoch()
 
     def test_legacy_checkpoint_missing_either_field_uses_safe_defaults(self):
         for present_fields in ((), ("best_ap",), ("best_ap_available",)):

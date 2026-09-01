@@ -2,7 +2,6 @@
 # -*- coding:utf-8 -*-
 # Copyright (c) Megvii, Inc. and its affiliates.
 
-import copy
 import datetime
 import os
 import time
@@ -18,6 +17,7 @@ from yolox.utils import (
     MeterBuffer,
     ModelEMA,
     all_reduce_norm,
+    get_async_norm_states,
     get_local_rank,
     get_model_info,
     get_rank,
@@ -245,21 +245,19 @@ class Trainer:
                 self.save_ckpt(ckpt_name="last_mosaic_epoch")
 
     def after_epoch(self):
-        checkpoint_states = None
+        checkpoint_norm_states = None
         update_best_ckpt = None
         if (self.epoch + 1) % self.exp.eval_interval == 0:
             save_model = self.ema_model.ema if self.use_model_ema else self.model
-            checkpoint_states = (
-                copy.deepcopy(save_model.state_dict()),
-                copy.deepcopy(self.optimizer.state_dict()),
-            )
+            checkpoint_norm_states = {
+                key: value.detach().cpu().clone()
+                for key, value in get_async_norm_states(save_model).items()
+            }
             all_reduce_norm(self.model)
             update_best_ckpt = self.evaluate_and_save_model(save_checkpoint=False)
 
-        if checkpoint_states is not None:
-            self._checkpoint_model_state, self._checkpoint_optimizer_state = (
-                checkpoint_states
-            )
+        if checkpoint_norm_states is not None:
+            self._checkpoint_norm_states = checkpoint_norm_states
         try:
             self.save_ckpt(ckpt_name="latest")
             ##add##
@@ -267,9 +265,8 @@ class Trainer:
             if save_interval is not None and (self.epoch + 1) % save_interval == 0:
                 self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
         finally:
-            if checkpoint_states is not None:
-                del self._checkpoint_model_state
-                del self._checkpoint_optimizer_state
+            if checkpoint_norm_states is not None:
+                del self._checkpoint_norm_states
 
         if update_best_ckpt is not None:
             self.save_ckpt("last_epoch", update_best_ckpt)
@@ -406,16 +403,14 @@ class Trainer:
         if self.rank == 0:
             save_model = self.ema_model.ema if self.use_model_ema else self.model
             logger.info("Save weights to {}".format(self.file_name))
-            model_state = getattr(self, "_checkpoint_model_state", None)
-            optimizer_state = getattr(self, "_checkpoint_optimizer_state", None)
+            model_state = save_model.state_dict()
+            checkpoint_norm_states = getattr(self, "_checkpoint_norm_states", None)
+            if checkpoint_norm_states is not None:
+                model_state.update(checkpoint_norm_states)
             ckpt_state = {
                 "start_epoch": self.epoch + 1,
-                "model": save_model.state_dict() if model_state is None else model_state,
-                "optimizer": (
-                    self.optimizer.state_dict()
-                    if optimizer_state is None
-                    else optimizer_state
-                ),
+                "model": model_state,
+                "optimizer": self.optimizer.state_dict(),
                 "best_ap": self.best_ap,
                 "best_ap_available": self.best_ap_available,
             }
