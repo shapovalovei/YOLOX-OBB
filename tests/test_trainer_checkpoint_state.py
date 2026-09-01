@@ -1,0 +1,285 @@
+"""Regression coverage for trainer best-checkpoint state persistence."""
+
+import hashlib
+import importlib.util
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+import torch
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class _Logger:
+    def info(self, message):
+        pass
+
+
+class _TensorBoard:
+    def add_scalar(self, name, value, step):
+        pass
+
+
+class _CheckpointModel(torch.nn.Module):
+    def __init__(self, value):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor([value], dtype=torch.float32))
+
+
+def _load_maintained_save_checkpoint():
+    path = ROOT / "yolox" / "utils" / "checkpoint.py"
+    spec = importlib.util.spec_from_file_location(
+        "trainer_checkpoint_state_checkpoint_module", path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load {}".format(path))
+    module = importlib.util.module_from_spec(spec)
+    loguru_stub = types.ModuleType("loguru")
+    loguru_stub.logger = _Logger()
+    original_loguru = sys.modules.get("loguru")
+    sys.modules["loguru"] = loguru_stub
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if original_loguru is None:
+            sys.modules.pop("loguru", None)
+        else:
+            sys.modules["loguru"] = original_loguru
+    return module.save_checkpoint
+
+
+def _load_trainer():
+    yolox_stub = types.ModuleType("yolox")
+    yolox_stub.__path__ = [str(ROOT / "yolox")]
+    data_stub = types.ModuleType("yolox.data")
+    data_stub.DataPrefetcher = object
+    utils_stub = types.ModuleType("yolox.utils")
+    utils_stub.MeterBuffer = object
+    utils_stub.ModelEMA = object
+    utils_stub.all_reduce_norm = lambda *args: None
+    utils_stub.get_local_rank = lambda: 0
+    utils_stub.get_model_info = lambda *args: ""
+    utils_stub.get_rank = lambda: 0
+    utils_stub.get_world_size = lambda: 1
+    utils_stub.gpu_mem_usage = lambda: 0
+    utils_stub.is_parallel = lambda model: False
+    utils_stub.load_ckpt = lambda model, ckpt: model
+    utils_stub.occupy_mem = lambda: None
+    utils_stub.save_checkpoint = _load_maintained_save_checkpoint()
+    utils_stub.setup_logger = lambda *args, **kwargs: None
+    utils_stub.synchronize = lambda: None
+    apex_stub = types.ModuleType("apex")
+    apex_stub.amp = types.SimpleNamespace()
+    apex_amp_stub = types.ModuleType("apex.amp")
+    tensorboard_stub = types.ModuleType("torch.utils.tensorboard")
+    tensorboard_stub.SummaryWriter = object
+    loguru_stub = types.ModuleType("loguru")
+    loguru_stub.logger = _Logger()
+    replacements = {
+        "yolox": yolox_stub,
+        "yolox.data": data_stub,
+        "yolox.utils": utils_stub,
+        "apex": apex_stub,
+        "apex.amp": apex_amp_stub,
+        "torch.utils.tensorboard": tensorboard_stub,
+        "loguru": loguru_stub,
+    }
+    original_modules = {
+        module_name: sys.modules.get(module_name) for module_name in replacements
+    }
+    sys.modules.update(replacements)
+    try:
+        path = ROOT / "yolox" / "core" / "trainer.py"
+        spec = importlib.util.spec_from_file_location(
+            "trainer_checkpoint_state_trainer_module", path
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError("cannot load {}".format(path))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for module_name, original in original_modules.items():
+            if original is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = original
+
+
+def _trainer(module, directory, best_ap=0, best_ap_available=False, epoch=7):
+    trainer = object.__new__(module.Trainer)
+    trainer.use_model_ema = False
+    trainer.model = _CheckpointModel(2.0)
+    trainer.optimizer = torch.optim.SGD(trainer.model.parameters(), lr=0.1)
+    trainer.amp_training = False
+    trainer.rank = 0
+    trainer.device = "cpu"
+    trainer.file_name = str(directory)
+    trainer.epoch = epoch
+    trainer.best_ap = best_ap
+    trainer.best_ap_available = best_ap_available
+    return trainer
+
+
+def _resume(module, directory, checkpoint_path, best_ap=42, best_ap_available=True):
+    trainer = _trainer(
+        module,
+        directory,
+        best_ap=best_ap,
+        best_ap_available=best_ap_available,
+    )
+    trainer.args = SimpleNamespace(resume=True, ckpt=str(checkpoint_path), start_epoch=None)
+    trainer.resume_train(trainer.model)
+    return trainer
+
+
+def _digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+class TrainerCheckpointStateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.trainer_module = _load_trainer()
+
+    def _historical_checkpoint(self, directory):
+        source = _trainer(
+            self.trainer_module,
+            directory,
+            best_ap=0.8,
+            best_ap_available=True,
+        )
+        source.save_ckpt("historical", update_best_ckpt=True)
+        source.save_ckpt("latest")
+        return directory / "latest_ckpt.pth"
+
+    def test_new_checkpoint_serializes_and_resume_restores_best_state(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            source = _trainer(
+                self.trainer_module,
+                directory,
+                best_ap=0.8,
+                best_ap_available=True,
+            )
+            source.save_ckpt("latest")
+
+            state = torch.load(directory / "latest_ckpt.pth", map_location="cpu")
+            self.assertEqual(
+                set(state),
+                {"start_epoch", "model", "optimizer", "best_ap", "best_ap_available"},
+            )
+            self.assertEqual(state["best_ap"], 0.8)
+            self.assertTrue(state["best_ap_available"])
+
+            resumed = _resume(
+                self.trainer_module,
+                directory,
+                directory / "latest_ckpt.pth",
+            )
+
+            self.assertEqual(resumed.start_epoch, 8)
+            self.assertEqual(resumed.best_ap, 0.8)
+            self.assertTrue(resumed.best_ap_available)
+
+    def test_lower_metric_after_resume_keeps_historical_best_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            latest_path = self._historical_checkpoint(directory)
+            historical_best_digest = _digest(directory / "best_ckpt.pth")
+            resumed = _resume(self.trainer_module, directory, latest_path)
+            resumed.epoch = 8
+            resumed.exp = SimpleNamespace(
+                eval=mock.Mock(return_value=(0.7, 0.8, "numeric timing"))
+            )
+            resumed.evaluator = object()
+            resumed.is_distributed = False
+            resumed.tblogger = _TensorBoard()
+
+            resumed.evaluate_and_save_model()
+
+            self.assertEqual(_digest(directory / "best_ckpt.pth"), historical_best_digest)
+            self.assertEqual(resumed.best_ap, 0.8)
+            self.assertTrue(resumed.best_ap_available)
+            state = torch.load(directory / "last_epoch_ckpt.pth", map_location="cpu")
+            self.assertEqual(state["best_ap"], 0.8)
+            self.assertTrue(state["best_ap_available"])
+
+    def test_higher_metric_after_resume_updates_best_checkpoint_and_metadata(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            latest_path = self._historical_checkpoint(directory)
+            historical_best_digest = _digest(directory / "best_ckpt.pth")
+            resumed = _resume(self.trainer_module, directory, latest_path)
+            resumed.epoch = 8
+            resumed.exp = SimpleNamespace(
+                eval=mock.Mock(return_value=(0.9, 0.8, "numeric timing"))
+            )
+            resumed.evaluator = object()
+            resumed.is_distributed = False
+            resumed.tblogger = _TensorBoard()
+
+            resumed.evaluate_and_save_model()
+
+            self.assertNotEqual(_digest(directory / "best_ckpt.pth"), historical_best_digest)
+            self.assertEqual(resumed.best_ap, 0.9)
+            self.assertTrue(resumed.best_ap_available)
+            for name in ("last_epoch_ckpt.pth", "best_ckpt.pth"):
+                state = torch.load(directory / name, map_location="cpu")
+                self.assertEqual(state["best_ap"], 0.9)
+                self.assertTrue(state["best_ap_available"])
+
+    def test_legacy_checkpoint_missing_either_field_uses_safe_defaults(self):
+        for present_fields in ((), ("best_ap",), ("best_ap_available",)):
+            with self.subTest(present_fields=present_fields):
+                with tempfile.TemporaryDirectory() as directory_name:
+                    directory = Path(directory_name)
+                    source = _trainer(self.trainer_module, directory)
+                    state = {
+                        "start_epoch": 8,
+                        "model": source.model.state_dict(),
+                        "optimizer": source.optimizer.state_dict(),
+                    }
+                    if "best_ap" in present_fields:
+                        state["best_ap"] = 0.8
+                    if "best_ap_available" in present_fields:
+                        state["best_ap_available"] = True
+                    checkpoint_path = directory / "legacy_ckpt.pth"
+                    torch.save(state, checkpoint_path)
+
+                    resumed = _resume(
+                        self.trainer_module,
+                        directory,
+                        checkpoint_path,
+                    )
+
+                    self.assertEqual(resumed.start_epoch, 8)
+                    self.assertEqual(resumed.best_ap, 0)
+                    self.assertFalse(resumed.best_ap_available)
+
+                    resumed.exp = SimpleNamespace(
+                        eval=mock.Mock(return_value=(0.7, 0.8, "numeric timing"))
+                    )
+                    resumed.evaluator = object()
+                    resumed.is_distributed = False
+                    resumed.tblogger = _TensorBoard()
+                    resumed.epoch = 8
+                    resumed.evaluate_and_save_model()
+
+                    self.assertEqual(resumed.best_ap, 0.7)
+                    self.assertTrue(resumed.best_ap_available)
+                    state = torch.load(
+                        directory / "last_epoch_ckpt.pth", map_location="cpu"
+                    )
+                    self.assertEqual(state["best_ap"], 0.7)
+                    self.assertTrue(state["best_ap_available"])
+
+
+if __name__ == "__main__":
+    unittest.main()

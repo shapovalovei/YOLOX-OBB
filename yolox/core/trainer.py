@@ -320,6 +320,12 @@ class Trainer:
             # resume the training states variables
             if self.amp_training and "amp" in ckpt:
                 amp.load_state_dict(ckpt["amp"])
+            if "best_ap" in ckpt and "best_ap_available" in ckpt:
+                self.best_ap = ckpt["best_ap"]
+                self.best_ap_available = ckpt["best_ap_available"]
+            else:
+                self.best_ap = 0
+                self.best_ap_available = False
             start_epoch = (
                 self.args.start_epoch - 1
                 if self.args.start_epoch is not None
@@ -366,11 +372,13 @@ class Trainer:
             logger.info("\n" + summary)
         synchronize()
 
-        update_best_ckpt = has_metrics and ap50_95 > self.best_ap
-        self.save_ckpt("last_epoch", update_best_ckpt)
         if has_metrics:
+            update_best_ckpt = ap50_95 > self.best_ap
             self.best_ap_available = True
             self.best_ap = max(self.best_ap, ap50_95)
+        else:
+            update_best_ckpt = False
+        self.save_ckpt("last_epoch", update_best_ckpt)
 
     def save_ckpt(self, ckpt_name, update_best_ckpt=False):
         if self.rank == 0:
@@ -380,6 +388,8 @@ class Trainer:
                 "start_epoch": self.epoch + 1,
                 "model": save_model.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
+                "best_ap": self.best_ap,
+                "best_ap_available": self.best_ap_available,
             }
             if self.amp_training:
                 # save amp state according to
