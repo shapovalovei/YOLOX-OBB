@@ -594,7 +594,7 @@ class YOLOXHeadOBB_KLD(nn.Module):
 
 
         if mode == "cpu":
-            cls_preds_, obj_preds_ = cls_preds_.cpu(), obj_preds_.cpu()
+            cls_preds_, obj_preds_ = cls_preds_.cpu(), obj_preds_.cpu().float()
             #angle_preds_per_image_ = angle_preds_per_image_.cpu()
 
         cls_preds_ = (
