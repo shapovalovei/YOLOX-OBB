@@ -506,7 +506,7 @@ class YOLOXHead(nn.Module):
         pair_wise_ious_loss = -torch.log(pair_wise_ious + 1e-8)
 
         if mode == "cpu":
-            cls_preds_, obj_preds_ = cls_preds_.cpu(), obj_preds_.cpu()
+            cls_preds_, obj_preds_ = cls_preds_.cpu(), obj_preds_.cpu().float()
 
         cls_preds_ = (
             cls_preds_.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
