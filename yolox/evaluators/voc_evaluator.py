@@ -68,6 +68,9 @@ class VOCEvaluator:
             ap50 (float) : VOC 2007 metric AP of IoU=50
             summary (sr): summary info of evaluation.
         """
+        if len(self.dataloader) == 0:
+            raise ValueError("VOC evaluator requires a non-empty dataloader.")
+
         # TODO half to amp_test
         tensor_type = torch.cuda.HalfTensor if half else torch.cuda.FloatTensor
         model = model.eval()
@@ -163,18 +166,25 @@ class VOCEvaluator:
         nms_time = statistics[1].item()
         n_samples = statistics[2].item()
 
-        a_infer_time = 1000 * inference_time / (n_samples * self.dataloader.batch_size)
-        a_nms_time = 1000 * nms_time / (n_samples * self.dataloader.batch_size)
+        if n_samples > 0:
+            a_infer_time = 1000 * inference_time / (
+                n_samples * self.dataloader.batch_size
+            )
+            a_nms_time = 1000 * nms_time / (n_samples * self.dataloader.batch_size)
 
-        time_info = ", ".join(
-            [
-                "Average {} time: {:.2f} ms".format(k, v)
-                for k, v in zip(
-                    ["forward", "NMS", "inference"],
-                    [a_infer_time, a_nms_time, (a_infer_time + a_nms_time)],
-                )
-            ]
-        )
+            time_info = ", ".join(
+                [
+                    "Average {} time: {:.2f} ms".format(k, v)
+                    for k, v in zip(
+                        ["forward", "NMS", "inference"],
+                        [a_infer_time, a_nms_time, (a_infer_time + a_nms_time)],
+                    )
+                ]
+            )
+        else:
+            time_info = (
+                "Timing unavailable: no batch was eligible for latency statistics."
+            )
 
         info = time_info + "\n"
 
