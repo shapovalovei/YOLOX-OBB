@@ -244,15 +244,19 @@ class Trainer:
                 self.save_ckpt(ckpt_name="last_mosaic_epoch")
 
     def after_epoch(self):
+        update_best_ckpt = None
+        if (self.epoch + 1) % self.exp.eval_interval == 0:
+            all_reduce_norm(self.model)
+            update_best_ckpt = self.evaluate_and_save_model(save_checkpoint=False)
+
         self.save_ckpt(ckpt_name="latest")
         ##add##
         save_interval = getattr(self.exp, "save_interval", None)
         if save_interval is not None and (self.epoch + 1) % save_interval == 0:
             self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
 
-        if (self.epoch + 1) % self.exp.eval_interval == 0:
-            all_reduce_norm(self.model)
-            self.evaluate_and_save_model()
+        if update_best_ckpt is not None:
+            self.save_ckpt("last_epoch", update_best_ckpt)
 
     def before_iter(self):
         pass
@@ -347,7 +351,7 @@ class Trainer:
 
         return model
 
-    def evaluate_and_save_model(self):
+    def evaluate_and_save_model(self, save_checkpoint=True):
         if self.use_model_ema:
             evalmodel = self.ema_model.ema
         else:
@@ -378,7 +382,9 @@ class Trainer:
             self.best_ap = max(self.best_ap, ap50_95)
         else:
             update_best_ckpt = False
-        self.save_ckpt("last_epoch", update_best_ckpt)
+        if save_checkpoint:
+            self.save_ckpt("last_epoch", update_best_ckpt)
+        return update_best_ckpt
 
     def save_ckpt(self, ckpt_name, update_best_ckpt=False):
         if self.rank == 0:

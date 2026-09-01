@@ -235,6 +235,55 @@ class TrainerCheckpointStateTests(unittest.TestCase):
                 self.assertEqual(state["best_ap"], 0.9)
                 self.assertTrue(state["best_ap_available"])
 
+    def test_after_epoch_keeps_default_latest_resume_state_current_after_best_eval(self):
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            trainer = _trainer(
+                self.trainer_module,
+                directory,
+                best_ap=0.8,
+                best_ap_available=True,
+            )
+            trainer.exp = SimpleNamespace(
+                eval_interval=1,
+                save_interval=99,
+                eval=mock.Mock(return_value=(0.9, 0.8, "numeric timing")),
+            )
+            trainer.evaluator = object()
+            trainer.is_distributed = False
+            trainer.tblogger = _TensorBoard()
+            save_ckpt = mock.Mock(wraps=trainer.save_ckpt)
+            trainer.save_ckpt = save_ckpt
+
+            trainer.after_epoch()
+
+            self.assertEqual(
+                save_ckpt.call_args_list,
+                [mock.call(ckpt_name="latest"), mock.call("last_epoch", True)],
+            )
+            latest_state = torch.load(
+                directory / "latest_ckpt.pth", map_location="cpu"
+            )
+            self.assertEqual(latest_state["best_ap"], 0.9)
+            self.assertTrue(latest_state["best_ap_available"])
+
+            resumed = _trainer(
+                self.trainer_module,
+                directory,
+                best_ap=42,
+                best_ap_available=True,
+            )
+            resumed.args = SimpleNamespace(
+                resume=True,
+                ckpt=None,
+                start_epoch=None,
+            )
+            resumed.resume_train(resumed.model)
+
+            self.assertEqual(resumed.start_epoch, 8)
+            self.assertEqual(resumed.best_ap, 0.9)
+            self.assertTrue(resumed.best_ap_available)
+
     def test_legacy_checkpoint_missing_either_field_uses_safe_defaults(self):
         for present_fields in ((), ("best_ap",), ("best_ap_available",)):
             with self.subTest(present_fields=present_fields):
