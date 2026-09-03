@@ -183,10 +183,16 @@ class Trainer:
             is_distributed=self.is_distributed,
             no_aug=self.no_aug,
         )
+        # Configure the emission-time phase before DataPrefetcher creates its
+        # iterator and preloads the first batch.
+        self.max_iter = len(self.train_loader)
+        cutover_epoch = self.max_epoch - self.exp.no_aug_epochs
+        self.train_loader.configure_mosaic_schedule(
+            start_ordinal=self.start_epoch * self.max_iter,
+            cutover_ordinal=cutover_epoch * self.max_iter,
+        )
         logger.info("init prefetcher, this might take one minute or less...")
         self.prefetcher = DataPrefetcher(self.train_loader)
-        # max_iter means iters per epoch
-        self.max_iter = len(self.train_loader)
 
         self.lr_scheduler = self.exp.get_lr_scheduler(
             self.exp.basic_lr_per_img * self.args.batch_size, self.max_iter
@@ -232,7 +238,7 @@ class Trainer:
     def before_epoch(self):
         logger.info("---> start train epoch{}".format(self.epoch + 1))
 
-        if self.epoch + 1 == self.max_epoch - self.exp.no_aug_epochs or self.no_aug:
+        if self.epoch >= self.max_epoch - self.exp.no_aug_epochs or self.no_aug:
             logger.info("--->No mosaic aug now!")
             self.train_loader.close_mosaic()
             logger.info("--->Add additional L1 loss now!")
@@ -241,8 +247,6 @@ class Trainer:
             else:
                 self.model.head.use_l1 = True
             self.exp.eval_interval = 1
-            if not self.no_aug:
-                self.save_ckpt(ckpt_name="last_mosaic_epoch")
 
     def after_epoch(self):
         checkpoint_norm_states = None
@@ -265,6 +269,14 @@ class Trainer:
                 save_interval = getattr(self.exp, "save_interval", None)
                 if save_interval is not None and (self.epoch + 1) % save_interval == 0:
                     self.save_ckpt(ckpt_name="{}_epoch".format(self.epoch + 1))
+                no_aug_epochs = getattr(self.exp, "no_aug_epochs", 0)
+                max_epoch = getattr(self, "max_epoch", None)
+                if (
+                    max_epoch is not None
+                    and no_aug_epochs > 0
+                    and self.epoch + 1 == max_epoch - no_aug_epochs
+                ):
+                    self.save_ckpt(ckpt_name="last_mosaic_epoch")
             finally:
                 if checkpoint_norm_states is not None:
                     del self._checkpoint_norm_states

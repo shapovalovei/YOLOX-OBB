@@ -23,11 +23,29 @@ class YoloBatchSampler(torchBatchSampler):
         self.input_dim = input_dimension
         self.new_input_dim = None
         self.mosaic = mosaic
+        self._next_logical_batch_ordinal = 0
+        self._mosaic_cutover_ordinal = None
+
+    def configure_mosaic_schedule(self, start_ordinal, cutover_ordinal):
+        """Configure an emission-time Mosaic phase schedule.
+
+        The ordinal is attached to the logical batch stream rather than to a
+        worker or a consumed result, so already-prefetched work has the same
+        phase decision as newly emitted work.
+        """
+        self._next_logical_batch_ordinal = start_ordinal
+        self._mosaic_cutover_ordinal = cutover_ordinal
 
     def __iter__(self):
         self.__set_input_dim()
         for batch in super().__iter__():
-            yield [(self.input_dim, idx, self.mosaic) for idx in batch]
+            ordinal = self._next_logical_batch_ordinal
+            self._next_logical_batch_ordinal += 1
+            if self._mosaic_cutover_ordinal is None:
+                mosaic = self.mosaic
+            else:
+                mosaic = ordinal < self._mosaic_cutover_ordinal
+            yield [(self.input_dim, idx, mosaic) for idx in batch]
             self.__set_input_dim()
 
     def __set_input_dim(self):
