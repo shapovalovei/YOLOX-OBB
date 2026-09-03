@@ -242,6 +242,15 @@ class Issue78TrainerLifecycleTests(unittest.TestCase):
         self.assertEqual(observed_l1, [False, False, False, True, True])
         self.assertEqual(observed_close, [0, 0, 0, 1, 1])
 
+    def test_100_15_contract_has_exactly_15_no_aug_l1_epochs(self):
+        observed_l1 = []
+        for epoch in range(100):
+            trainer = _epoch_trainer(self.trainer_module, 100, 15, epoch)
+            trainer.before_epoch()
+            observed_l1.append(trainer.model.head.use_l1)
+
+        self.assertEqual(observed_l1, [False] * 85 + [True] * 15)
+
     def test_direct_no_aug_start_has_l1_and_no_mosaic_immediately(self):
         trainer = _epoch_trainer(
             self.trainer_module, max_epoch=5, no_aug_epochs=2, epoch=3, no_aug=True
