@@ -1,101 +1,53 @@
+# Quick run
 
-# Get Started
+This is the short path for the maintained YOLOX-OBB fork. For contracts and boundaries, read the [maintainer guide](maintainer_guide.md) first.
 
-## 1.Installation
+## Install and verify
 
-Step1. Install YOLOX.
-```shell
-git clone git@github.com:Megvii-BaseDetection/YOLOX.git
-cd YOLOX
-pip3 install -U pip && pip3 install -r requirements.txt
-pip3 install -v -e .  # or  python3 setup.py develop
-```
-Step2. Install [apex](https://github.com/NVIDIA/apex).
+Use an isolated environment with importable PyTorch, a compiler, Python development headers, and compatible setuptools:
 
-```shell
-# skip this step if you don't want to train model.
-git clone https://github.com/NVIDIA/apex
-cd apex
-pip3 install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
-```
-Step3. Install [pycocotools](https://github.com/cocodataset/cocoapi).
-
-```shell
-pip3 install cython; pip3 install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
+```bash
+python -m pip install -r requirements.txt
+python -m pip install -v -e . --no-build-isolation
 ```
 
-## 2.Demo
+The root build includes both `yolox._C` and `DOTA_devkit_YOLO._polyiou`. Verify them before a long run:
 
-Step1. Download a pretrained model from the benchmark table.
+```bash
+python - <<'PY'
+from DOTA_devkit_YOLO import polyiou
+import yolox._C
 
-Step2. Use either -n or -f to specify your detector's config. For example:
-
-```shell
-python tools/demo.py image -n yolox-s -c /path/to/your/yolox_s.pth --path assets/dog.jpg --conf 0.25 --nms 0.45 --tsize 640 --save_result --device [cpu/gpu]
-```
-or
-```shell
-python tools/demo.py image -f exps/default/yolox_s.py -c /path/to/your/yolox_s.pth --path assets/dog.jpg --conf 0.25 --nms 0.45 --tsize 640 --save_result --device [cpu/gpu]
-```
-Demo for video:
-```shell
-python tools/demo.py video -n yolox-s -c /path/to/your/yolox_s.pth --path /path/to/your/video --conf 0.25 --nms 0.45 --tsize 640 --save_result --device [cpu/gpu]
+p = polyiou.VectorDouble([0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 2.0])
+assert abs(polyiou.iou_poly(p, p) - 1.0) < 1e-12
+print("native extensions: OK")
+PY
 ```
 
+If the editable frontend fails in a current pip/setuptools environment, try the source-preserving fallback:
 
-## 3.Reproduce our results on COCO
-
-Step1. Prepare COCO dataset
-```shell
-cd <YOLOX_HOME>
-ln -s /path/to/your/COCO ./datasets/COCO
+```bash
+python -m pip install -v . --no-build-isolation --no-deps
 ```
 
-Step2. Reproduce our results on COCO by specifying -n:
+The fallback is not a universal compatibility guarantee. The current training/evaluation import path also requires Apex.
 
-```shell
-python tools/train.py -n yolox-s -d 8 -b 64 --fp16 -o
-                         yolox-m
-                         yolox-l
-                         yolox-x
-```
-* -d: number of gpu devices
-* -b: total batch size, the recommended number for -b is num-gpu * 8
-* --fp16: mixed precision training
+## Run an experiment
 
-**Multi Machine Training**
+Copy an OBB experiment and edit its dataset paths and classes before running. The following commands are CUDA-oriented and are source-verified examples, not a claim that a checkpoint or dataset is included:
 
-We also support multi-nodes training. Just add the following args:
-* --num\_machines: num of your total training nodes
-* --machine\_rank: specify the rank of each node
-
-When using -f, the above commands are equivalent to:
-
-```shell
-python tools/train.py -f exps/default/yolox-s.py -d 8 -b 64 --fp16 -o
-                         exps/default/yolox-m.py
-                         exps/default/yolox-l.py
-                         exps/default/yolox-x.py
+```bash
+cp exps/example/yolox_voc/yolox_dota_s_obb_kld.py exps/my_dota_obb.py
+python tools/train.py -n yolox-s -f exps/my_dota_obb.py -d 1 -b 8 --fp16 -o
+python tools/eval.py -n yolox-s -f exps/my_dota_obb.py -c /path/to/ckpt.pth.tar -b 8 --fp16
 ```
 
-## 4.Evaluation
+The DOTA evaluator writes polygon result files for external evaluation; it does not produce a complete internal DOTA AP score. See [custom OBB data](train_custom_data.md) and the [maintainer guide](maintainer_guide.md) for the dataset layout, phase schedule, and evaluator limits.
 
-We support batch testing for fast evaluation:
+## Run local tests
 
-```shell
-python tools/eval.py -n  yolox-s -c yolox_s.pth -b 64 -d 8 --conf 0.001 [--fp16] [--fuse]
-                         yolox-m
-                         yolox-l
-                         yolox-x
+```bash
+PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES='' python -m unittest discover -s tests -p 'test_*.py' -v
 ```
-* --fuse: fuse conv and bn
-* -d: number of GPUs used for evaluation. DEFAULT: All GPUs available will be used.
-* -b: total batch size across on all GPUs
 
-To reproduce speed test, we use the following command:
-```shell
-python tools/eval.py -n  yolox-s -c yolox_s.pth -b 1 -d 1 --conf 0.001 --fp16 --fuse
-                         yolox-m
-                         yolox-l
-                         yolox-x
-```
+These tests are maintained correctness evidence, not model-quality or mobile qualification evidence. See [local testing](testing.md).

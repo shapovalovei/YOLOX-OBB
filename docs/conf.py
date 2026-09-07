@@ -36,7 +36,7 @@ class GithubURLDomain(Domain):
     """
 
     name = "githuburl"
-    ROOT = "https://github.com/Megvii-BaseDetection/YOLOX"
+    ROOT = "https://github.com/shapovalovei/YOLOX-OBB"
     # LINKED_DOC = ["tutorials/install", "tutorials/getting_started"]
     LINKED_DOC = ["tutorials/install",]
 
@@ -109,7 +109,7 @@ import yolox  # isort: skip
 #     fixup_module_metadata("torch.utils.data", torch.utils.data.__dict__)
 
 
-project = "YOLOX"
+project = "YOLOX-OBB"
 copyright = "2021-2021, YOLOX contributors"
 author = "YOLOX contributors"
 
@@ -250,7 +250,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "YOLOX", "YOLOX Documentation", [author], 1)]
+man_pages = [(master_doc, "yolox-obb", "YOLOX-OBB Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -261,10 +261,10 @@ man_pages = [(master_doc, "YOLOX", "YOLOX Documentation", [author], 1)]
 texinfo_documents = [
     (
         master_doc,
-        "YOLOX",
-        "YOLOX Documentation",
+        "YOLOX-OBB",
+        "YOLOX-OBB Documentation",
         author,
-        "YOLOX",
+        "YOLOX-OBB",
         "One line description of project.",
         "Miscellaneous",
     )

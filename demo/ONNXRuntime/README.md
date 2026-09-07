@@ -1,5 +1,7 @@
 ## YOLOX-ONNXRuntime in Python
 
+> Backend reference inherited from upstream YOLOX. It is not an OBB support or device-qualification claim. See the [maintainer guide](../../docs/maintainer_guide.md) and the [maintained OBB ONNX notes](../../docs/demo/onnx_readme.md).
+
 This doc introduces how to convert your pytorch model into onnx, and how to run an onnxruntime demo to verify your convertion.
 
 ### Download ONNX models.

@@ -1,130 +1,59 @@
-# Train Custom Data
+# Train on custom OBB data
 
-This page explains how to train your own custom data with YOLOX.
+This repository maintains the generic OBB framework. A concrete dataset, run, checkpoint, and model-quality result belong in the separate training project and are not included by this guide.
 
-We take an example of fine-tuning YOLOX-S model on VOC dataset to give a more clear guide.
+## Dataset layout
 
-## 0. Before you start
-Clone this repo and follow the [README](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/README.md) to install YOLOX.
+The maintained DOTA/VOC-style experiment expects a layout equivalent to:
 
-## 1. Create your own dataset
-**Step 1** Prepare your own dataset with images and labels first. For labeling images, you can use tools like [Labelme](https://github.com/wkentaro/labelme) or [CVAT](https://github.com/openvinotoolkit/cvat).
-
-**Step 2** Then, you should write the corresponding Dataset Class which can load images and labels through `__getitem__` method. We currently support COCO format and VOC format.
-
-You can also write the Dataset by your own. Let's take the [VOC](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/data/datasets/voc.py#L151) Dataset file for example:
-```python
-    @Dataset.resize_getitem
-    def __getitem__(self, index):
-        img, target, img_info, img_id = self.pull_item(index)
-
-        if self.preproc is not None:
-            img, target = self.preproc(img, target, self.input_dim)
-
-        return img, target, img_info, img_id
+```text
+VOC2012/
+├── Annotations/
+├── ImageSets/Main/
+│   ├── train.txt
+│   └── val.txt
+├── JPEGImages/
+├── JPEGImages-val/
+└── JPEGImages-test/
 ```
 
-One more thing worth noting is that you should also implement [pull_item](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/data/datasets/voc.py#L129) and [load_anno](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/data/datasets/voc.py#L121) method for the `Mosiac` and `MixUp` augmentations.
+The annotation convention is OBB-specific. Source rows use `[xmin, ymin, xmax, ymax, angle_degrees, class_id]`; the training representation is `[class_id, center_x, center_y, width, height, angle_degrees]`. See [the maintainer guide](maintainer_guide.md) for validity and angle semantics.
 
-**Step 3** Prepare the evaluator. We currently have [COCO evaluator](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/evaluators/coco_evaluator.py) and [VOC evaluator](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/evaluators/voc_evaluator.py).
-If you have your own format data or evaluation metric, you can write your own evaluator.
+## Convert or prepare data
 
-**Step 4** Put your dataset under `$YOLOX_DIR/datasets`, for VOC:
+`custom tools/DOTA2VOC_obb.py` is a repository helper, but its current main path contains machine-specific absolute directories and does not expose a stable portable CLI. Configure those paths locally before using it. Because the path contains a space, quote it when invoking the script:
 
-```shell
-ln -s /path/to/your/VOCdevkit ./datasets/VOCdevkit
-```
-* The path "VOCdevkit" will be used in your exp file described in next section. Specifically, in `get_data_loader` and `get_eval_loader` function.
-
-✧✧✧ You can download the mini-coco128 dataset by the [link](https://drive.google.com/file/d/16N3u36ycNd70m23IM7vMuRQXejAJY9Fs/view?usp=sharing), and then unzip it to the `datasets` directory. The dataset has been converted from YOLO format to COCO format, and can be used directly as a dataset for testing whether the train environment can be runned successfully.
-
-## 2. Create your Exp file to control everything
-We put everything involved in a model to one single Exp file, including model setting, training setting, and testing setting.
-
-**A complete Exp file is at [yolox_base.py](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/yolox/exp/base_exp.py).** It may be too long to write for every exp, but you can inherit the base Exp file and only overwrite the changed part.
-
-Let's take the [VOC Exp file](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/exps/example/yolox_voc/yolox_voc_s.py) as an example.
-
-We select `YOLOX-S` model here, so we should change the network depth and width. VOC has only 20 classes, so we should also change the `num_classes`.
-
-These configs are changed in the `init()` method:
-```python
-class Exp(MyExp):
-    def __init__(self):
-        super(Exp, self).__init__()
-        self.num_classes = 20
-        self.depth = 0.33
-        self.width = 0.50
-        self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
-```
-
-Besides, you should also overwrite the `dataset` and `evaluator`, prepared before training the model on your own data.
-
-Please see [get_data_loader](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/exps/example/yolox_voc/yolox_voc_s.py#L20), [get_eval_loader](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/exps/example/yolox_voc/yolox_voc_s.py#L82), and [get_evaluator](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/exps/example/yolox_voc/yolox_voc_s.py#L113) for more details.
-
-✧✧✧ You can also see the `exps/example/custom` directory for more details.
-
-## 3. Train
-Except special cases, we always recommend to use our [COCO pretrained weights](https://github.com/Megvii-BaseDetection/YOLOX/blob/main/README.md) for initializing the model.
-
-Once you get the Exp file and the COCO pretrained weights we provided, you can train your own model by the following below command:
 ```bash
-python tools/train.py -f /path/to/your/Exp/file -d 8 -b 64 --fp16 -o -c /path/to/the/pretrained/weights
+python "custom tools/DOTA2VOC_obb.py"
 ```
 
-or take the `YOLOX-S` VOC training for example:
+The command is a source-verified invocation form and was not run during the documentation audit; it must not be read as proof that a dataset is present or conversion is complete.
+
+## Configure an experiment
+
+Copy an existing experiment into a local file and edit its data directory, split files, and class list. Do not overwrite a maintained example:
+
 ```bash
-python tools/train.py -f exps/example/yolox_voc/yolox_voc_s.py -d 8 -b 64 --fp16 -o -c /path/to/yolox_s.pth
+cp exps/example/yolox_voc/yolox_dota_s_obb_kld.py exps/my_dota_obb.py
 ```
 
-✧✧✧ For example:
-- If you download the [mini-coco128](https://drive.google.com/file/d/16N3u36ycNd70m23IM7vMuRQXejAJY9Fs/view?usp=sharing) and unzip it to the `datasets`, you can direct run the following training code.
-    ```bash
-    python tools/train.py -f exps/example/custom/yolox_s.py -d 8 -b 64 --fp16 -o -c /path/to/yolox_s.pth
-    ```
+The experiment controls augmentation, the no-Mosaic/L1 boundary, input dimensions, and evaluation behavior. The boundary is derived from `max_epoch`, `no_aug_epochs`, and the logical loader batch count; it is not a universal fixed epoch number.
 
-(Don't worry for the different shape of detection head between the pretrained weights and your own model, we will handle it)
+## Train and evaluate
 
-## 4. Tips for Best Training Results
+The current launch path is CUDA-oriented and imports Apex:
 
-As **YOLOX** is an anchor-free detector with only several hyper-parameters, most of the time good results can be obtained with no changes to the models or training settings.
-We thus always recommend you first train with all default training settings.
-
-If at first you don't get good results, there are steps you could consider to improve the model.
-
-**Model Selection** We provide `YOLOX-Nano`, `YOLOX-Tiny`, and `YOLOX-S` for mobile deployments, while `YOLOX-M`/`L`/`X` for cloud or high performance GPU deployments.
-
-If your deployment meets any compatibility issues. we recommend `YOLOX-DarkNet53`.
-
-**Training Configs** If your training overfits early, then you can reduce max\_epochs or decrease the base\_lr and min\_lr\_ratio in your Exp file:
-
-```python
-# --------------  training config --------------------- #
-    self.warmup_epochs = 5
-    self.max_epoch = 300
-    self.warmup_lr = 0
-    self.basic_lr_per_img = 0.01 / 64.0
-    self.scheduler = "yoloxwarmcos"
-    self.no_aug_epochs = 15
-    self.min_lr_ratio = 0.05
-    self.ema = True
-
-    self.weight_decay = 5e-4
-    self.momentum = 0.9
+```bash
+python tools/train.py -n yolox-s -f exps/my_dota_obb.py -d 1 -b 8 --fp16 -o
+python tools/eval.py -n yolox-s -f exps/my_dota_obb.py -c /path/to/ckpt.pth.tar -b 8 --fp16
 ```
 
-**Aug Configs** You may also change the degree of the augmentations.
+The example commands require a configured dataset, a compatible environment, and a checkpoint for evaluation. They were not executed during the documentation audit because that would require unavailable runtime dependencies and would cross the no-training/no-model-evaluation boundary.
 
-Generally, for small models, you should weak the aug, while for large models or small size of dataset, you may enchance the aug in your Exp file:
-```python
-# --------------- transform config ----------------- #
-    self.degrees = 10.0
-    self.translate = 0.1
-    self.scale = (0.1, 2)
-    self.mscale = (0.8, 1.6)
-    self.shear = 2.0
-    self.perspective = 0.0
-    self.enable_mixup = True
-```
+## DOTA evaluation boundary
 
-**Design your own detector** You may refer to our [Arxiv](https://arxiv.org/abs/2107.08430) paper for details and suggestions for designing your own detector.
+The evaluator writes per-class polygon result files for external DOTA evaluation and handles empty predictions as empty files. It does not calculate a complete DOTA AP score internally. The exposed `--test` option is not a portable unlabeled-DOTA workflow for the maintained experiment: its configured evaluation loader is validation-oriented and reads annotations from its XML layout.
+
+Conversion, result merging, and DOTA evaluation helpers include hardcoded paths or historical assumptions. Record the exact dataset, experiment, checkpoint, external evaluator, and artifact hashes in `card-detector-training`; do not turn a helper script into a generic framework guarantee.
+
+For export, mobile integration, or concrete checkpoint quality, use the owning downstream project. For framework contracts and local correctness tests, use the [maintainer guide](maintainer_guide.md).

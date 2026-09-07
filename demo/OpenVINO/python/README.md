@@ -1,5 +1,7 @@
 # YOLOX-OpenVINO in Python
 
+> Backend reference inherited from upstream YOLOX. It is not an OBB support or device-qualification claim. See the [maintainer guide](../../../docs/maintainer_guide.md) for current framework boundaries.
+
 This toturial includes a Python demo for OpenVINO, as well as some converted models.
 
 ### Download OpenVINO models.
@@ -52,7 +54,7 @@ source ~/.bashrc
 
 1. Export ONNX model
 
-   Please refer to the [ONNX toturial](https://github.com/Megvii-BaseDetection/YOLOX/demo/ONNXRuntime). **Note that you should set --opset to 10, otherwise your next step will fail.**
+   Please refer to the [ONNX reference](../../ONNXRuntime/README.md). **Note that you should set --opset to 10, otherwise your next step will fail.**
 
 2. Convert ONNX to OpenVINO
 
@@ -86,4 +88,3 @@ or
 ```shell
 python openvino_inference.py -m <XML_MODEL_PATH> -i <IMAGE_PATH> -o <OUTPUT_DIR> -s <SCORE_THR> -d <DEVICE>
 ```
-

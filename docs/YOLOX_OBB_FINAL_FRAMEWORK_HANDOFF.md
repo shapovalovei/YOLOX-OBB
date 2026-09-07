@@ -1,18 +1,19 @@
-# YOLOX-OBB final framework handoff
+# YOLOX-OBB historical framework handoff
 
-Status: final framework documentation handoff for Issue [#28](https://github.com/shapovalovei/YOLOX-OBB/issues/28).
+Status: historical framework documentation handoff for Issue [#28](https://github.com/shapovalovei/YOLOX-OBB/issues/28). It is retained for provenance and is not the current project baseline.
 
 This document records the final maintained framework contract and the
-cross-project actions that follow from it. The behavioral framework baseline
-is `0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce`, the verified `origin/main`
-revision before this documentation change. The documentation commit is
-separate and changes no framework behavior.
+cross-project actions that follow from it. The behavioral framework snapshot
+is `0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce`. The current maintained
+baseline is `a5738344fdab46aa72e1ffad4c11651f5a0184c3`; consult the
+[maintainer guide](maintainer_guide.md) for current contracts. The historical
+snapshot and this documentation commit change no framework behavior.
 
 ## Executive summary
 
-### Final baseline
+### Snapshot baseline
 
-`0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce` (`fix: correct OBB MixUp boundary geometry`, merged PR [#42](https://github.com/shapovalovei/YOLOX-OBB/pull/42)) is the final behavioral framework baseline for this handoff. It is the verified current `origin/main` revision and contains the accepted framework work covered below.
+`0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce` (`fix: correct OBB MixUp boundary geometry`, merged PR [#42](https://github.com/shapovalovei/YOLOX-OBB/pull/42)) is the behavioral snapshot for this handoff. It was superseded on the maintained branch by subsequent accepted work, including [PR #74](https://github.com/shapovalovei/YOLOX-OBB/pull/74) and [PR #79](https://github.com/shapovalovei/YOLOX-OBB/pull/79), before the current baseline recorded above.
 
 ### Audit result
 

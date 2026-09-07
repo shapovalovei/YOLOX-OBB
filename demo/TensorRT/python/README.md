@@ -1,5 +1,7 @@
 # YOLOX-TensorRT in Python
 
+> Backend reference inherited from upstream YOLOX. It is not an OBB support or device-qualification claim. See the [maintainer guide](../../../docs/maintainer_guide.md) for current framework boundaries.
+
 This toturial includes a Python demo for TensorRT.
 
 ## Install TensorRT Toolkit
@@ -43,4 +45,3 @@ or
 ```shell
 python tools/demo.py image -f exps/default/yolox_s.py --trt --save_result
 ```
-

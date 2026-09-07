@@ -1,5 +1,7 @@
 # YOLOX-CPP-ncnn
 
+> Backend reference inherited from upstream YOLOX. It is not an OBB support or device-qualification claim. See the [maintainer guide](../maintainer_guide.md) for current framework boundaries.
+
 Cpp file compile of YOLOX object detection base on [ncnn](https://github.com/Tencent/ncnn).  
 YOLOX is included in ncnn now, you could also try building from ncnn, it's better.
 
