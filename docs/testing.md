@@ -49,7 +49,7 @@ except ImportError:
             "cannot inspect installed YOLOX provenance: importlib.metadata is unavailable"
         ) from exc
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 import yolox
@@ -104,9 +104,7 @@ if installed_modules:
         parsed_url = urlparse(source_url or "")
         if parsed_url.scheme != "file" or parsed_url.netloc not in ("", "localhost"):
             raise RuntimeError("yolox direct_url.json does not identify a local source")
-        installed_source = Path(
-            url2pathname(unquote(parsed_url.path))
-        ).resolve()
+        installed_source = Path(url2pathname(parsed_url.path)).resolve()
     except RuntimeError:
         raise
     except Exception as exc:
