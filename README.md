@@ -1,147 +1,82 @@
 # YOLOX-OBB
-YOLOX in DOTA with KLD loss. (Oriented Object Detection)（Rotated BBox）基于YOLOX的旋转目标检测
 
-> **Maintained fork of [buzhidaoshenme/YOLOX-OBB](https://github.com/buzhidaoshenme/YOLOX-OBB).**
+YOLOX-OBB is a maintained fork of [YOLOX-OBB by buzhidaoshenme](https://github.com/buzhidaoshenme/YOLOX-OBB), with oriented bounding-box (OBB) support kept as a core framework contract. The original project and its license and attribution remain part of this repository's provenance; this is not the official Megvii YOLOX project.
 
-This fork preserves the original project, license, history, and attribution.
-It is maintained independently and contains additional regression-tested fixes.
-It is not the official YOLOX-OBB project.
+This repository maintains generic OBB model, data, training, evaluation, and export behavior. It is not a model registry or a mobile SDK.
 
-## Fixes in this maintained fork
+## Start here
 
-### Correct OBB geometry through augmentation
+- [Maintainer guide](docs/maintainer_guide.md): installation, native extensions, OBB contracts, training lifecycle, evaluation, export, and validation boundaries.
+- [Quick run](docs/quick_run.md): the shortest maintained-fork setup and command path.
+- [Custom OBB data](docs/train_custom_data.md): the current DOTA/VOC-style data layout and experiment workflow.
+- [Local validation](docs/testing.md): maintained correctness evidence and its limits.
+- [Sphinx documentation](docs/index.rst): the navigable documentation tree.
 
-The original `random_perspective`/Mosaic path treated encoded OBB center and
-dimension fields as HBB corner coordinates. After image transforms this could
-leave the rotated-box geometry inconsistent, including a stale angle. The fork
-decodes the OBB into image-space corners, applies the same affine or
-perspective transform as the image, clips the transformed geometry, and
-reconstructs a canonical OBB. Mosaic no longer clips encoded dimensions as if
-they were an axis-aligned rectangle.
+## Ownership boundaries
 
-### Correct KLD prediction/target order
+YOLOX-OBB owns generic framework and model correctness: OBB geometry, assignment, augmentation, model heads, decode, postprocess, rotated NMS, export behavior, and regression tests.
 
-The KLD training-head call now passes the prediction tensor first and the
-target tensor second, matching the semantics of the KLD implementation and its
-gradient direction.
+The related projects own different artifacts and integration layers:
 
-Both fixes have repository-local regression coverage. From the repository root,
-run:
+| Project | Owns |
+| --- | --- |
+| [`card-detector-training`](https://github.com/shapovalovei/card-detector-training) | datasets, recipes, training runs, checkpoints, model-quality evidence, concrete exports/quantization, and artifact provenance |
+| [`react-native-scanner-sdk`](https://github.com/shapovalovei/react-native-scanner-sdk) | mobile packaging and runtime integration, delegates, device preprocessing/decode/NMS, camera/ROI behavior, and release qualification |
 
-```shell
-python -m unittest discover -s tests -p 'test_*.py' -v
+Do not interpret downstream model or device results as generic framework guarantees.
+
+## Installation and native capabilities
+
+Use a clean virtual environment with a supported compiler toolchain and an importable PyTorch installation. The tracked `requirements.txt` is a broad inherited dependency list, not a validated modern compatibility matrix. It contains old export pins such as `onnx==1.8.1`, `onnxruntime==1.8.0`, and `onnx-simplifier==0.3.5`; exact environment compatibility is not guaranteed by that file. If you choose to use it, run from the repository root:
+
+```bash
+python -m pip install -r requirements.txt
+python -m pip install -v -e . --no-build-isolation
 ```
 
-## Installation 
-1. Install YOLOX-OBB(You can refer to the installation of [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX))
-```shell
-cd YOLOX-OBB
-pip3 install -r requirements.txt
-pip install -v -e . --no-build-isolation
-```
-2. Install pycocotools
-```shell
-pip3 install cython; pip3 install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
-```
-PyTorch must already be installed in the active environment because the root
-package uses PyTorch C++ extension tooling. The root installation builds both
-the YOLOX native extension and the rotated-IoU extension. A compatible C/C++
-compiler and build toolchain are required. SWIG is not required for normal
-installation because the generated Python and C++ wrapper sources are included
-in the repository. SWIG is only needed by maintainers who intentionally
-regenerate the wrapper from `polyiou.i`.
+The root build compiles both native extensions used by maintained paths:
 
-Verify the rotated-IoU capability with:
-```shell
-python - <<'PY'
-import yolox.utils
-from DOTA_devkit_YOLO import polyiou
+- `yolox._C` for the YOLOX native operators;
+- `DOTA_devkit_YOLO._polyiou` for rotated polygon IoU/NMS support.
 
-p = polyiou.VectorDouble([0, 0, 2, 0, 2, 2, 0, 2])
-print(polyiou.iou_poly(p, p))
-PY
-```
-3. Install apex
-```shell
-git clone https://github.com/NVIDIA/apex
-cd apex
-pip install -v --no-cache-dir ./
-cd -
-```
-## Data Preparation
-1. Split images and annotations(You can refer to [DOTA_devkit_YOLO](https://github.com/hukaixuan19970627/DOTA_devkit_YOLO))
-```shell
- python DOTA_devkit_YOLO/ImgSplit_multi_process.py
- ```
- 2. Transform annotations into voc-like format
- 
- * `This is a object in voc-like format annotation:`
- <img src="assets/voc-like .png" width="500" >
- 
- ```shell
- python custom tools/DOTA2VOC_obb.py
- ```
- 3. Organize Directories(All annotations of train-images and val-images must be put into Annotations folder)
- ```
- |--your_data
-     |--VOC2012
-         |--Annotations
-             |-- xxx.xml
-                 ... 
-         |--ImageSets
-             |--Main
-                 |--train.txt
-                 |--val.txt
-                 |--test.txt
-         |--JPEGImages
-         |--JPEGImages-val
-         |-JPEGImages-test
-```
-## Train 
-1. Modify configs
+A clean Git checkout contains the native source files, not compiled `.so` artifacts. Build the extensions before training or evaluation and fail fast with the [authoritative native smoke check](docs/testing.md#native-smoke-check) rather than discovering the missing capability after a long run. SWIG is only needed when regenerating the checked-in `DOTA_devkit_YOLO/polyiou_wrap.cxx`; it is not the normal first-run build requirement. Core native setup requires importable PyTorch, a compiler, Python development headers, and compatible setuptools independently of optional/backend/export dependencies.
 
-　change the data path with yours in [yolox_dota_s_obb_kld.py](https://github.com/buzhidaoshenme/YOLOX-OBB/blob/main/exps/example/yolox_voc/yolox_dota_s_obb_kld.py)
-```
-data_dir = 'your_data_path'
-```
-2. Train
-```
-CUDA_VISIBLE_DEVICES=0,1 python3 tools/train.py -f exps/example/yolox_voc/yolox_dota_s_obb_kld.py -d 2 -b 16 --fp16 -c weights/yolox_s.pth.tar
-```
-## Val
-1. get results
-```
-CUDA_VISIBLE_DEVICES=0,1 python tools/eval.py -f exps/example/yolox_voc/yolox_dota_s_obb_kld.py -d 2 -b 16 -c YOLOX_outputs/yolox_dota_s_obb_kld/latest_ckpt.pth
-```
-　The evaluator writes DOTA polygon result files to
-`your_data/results/VOC2012/Main`. It does not compute AP internally and
-returns `(None, None, timing_info)`; use the external DOTA evaluation tooling
-below for canonical metrics.
- * `If test, you must comment line 151 'target = self.load_anno(index)' and uncomment line 152 'target = []' in dota_obb.py before run the above instruction. Because test-set has no annotations.`
+Some modern Python/pip/setuptools combinations do not handle this repository's editable-install frontend reliably. The source-preserving fallback is:
 
-2. Merge results(You can refer to [DOTA_devkit_YOLO](https://github.com/hukaixuan19970627/DOTA_devkit_YOLO))
+```bash
+python -m pip install -v . --no-build-isolation --no-deps
 ```
-python DOTA_devkit_YOLO/ResultMerge.py
+
+That fallback has not been qualified for every OS, Python, PyTorch, and pip combination. Keep the exact interpreter and package versions in the environment record. Run the same [authoritative native smoke check](docs/testing.md#native-smoke-check) after either installation path; it launches Python outside the checkout, reports imported origins, and verifies the source provenance of any non-editable installation.
+
+`Apex` is imported by the current training/evaluation launch path and must be available for those tools; it is not installed by `requirements.txt`. `pycocotools` is an additional COCO-evaluation dependency, not a replacement for the OBB native extension.
+
+## Minimal OBB workflow
+
+The maintained examples use a DOTA/VOC-style OBB dataset and an experiment file. Copy an existing experiment into a local file, edit its dataset paths/classes, then run:
+
+```bash
+cp exps/example/yolox_voc/yolox_dota_s_obb_kld.py exps/my_dota_obb.py
+python tools/train.py -n yolox-s -f exps/my_dota_obb.py -d 1 -b 8 --fp16 -o
+python tools/eval.py -n yolox-s -f exps/my_dota_obb.py -c /path/to/ckpt.pth.tar -b 8 --fp16
 ```
-3. Evaluation
+
+These commands are CUDA-oriented and require the experiment's data and model configuration. The DOTA evaluator writes per-class polygon result files for external evaluation; it does not itself report a complete DOTA AP score. See the [maintainer guide](docs/maintainer_guide.md) for CPU limits, empty predictions, export boundaries, and unsupported helper-script assumptions.
+
+## Validation evidence
+
+Run the maintained local unit/regression suite with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES='' python -m unittest discover -s tests -p 'test_*.py' -v
 ```
-python DOTA_devkit_YOLO/dota_v1.5_evaluation_task1.py(You can refer to [DOTA_devkit_YOLO](https://github.com/hukaixuan19970627/DOTA_devkit_YOLO))
-```
- * `If test, you should upload your results to DOTA Evaluation Server.`
 
-The direct `DOTAEvaluator` supports single-process CPU float32 evaluation.
-CPU float16 evaluation is intentionally rejected. The `tools/eval.py` command
-and distributed launcher remain CUDA-oriented.
+The suite is correctness evidence for covered framework contracts. It does not prove that a trained checkpoint is better, that a particular export is faster, or that a mobile/device runtime is qualified. The current GitHub workflow declares style checks only, does not install the root package or run the test suite/native smoke, and references a `format_check.sh` file absent from this checkout. It is not authoritative full-suite execution. See [local testing](docs/testing.md).
 
-## Unfortunately 
-The historical external DOTA evaluation workflow reported 0.712 mAP@0.5 on
-DOTA v1.0.
+## Provenance and historical material
 
-## Reference
-[YOLOX](https://github.com/Megvii-BaseDetection/YOLOX)
+The [DOTA helper README](DOTA_devkit_YOLO/README.md) and the files under `docs/` preserve useful original-project context, but inherited commands and benchmark tables are not current guarantees unless the maintained guide says so. The [framework handoff ledger](docs/YOLOX_OBB_FINAL_FRAMEWORK_HANDOFF.md) is explicitly a historical snapshot; current behavior is defined by the checked-out source and maintained tests.
 
-[DOTA_devkit_YOLO](https://github.com/hukaixuan19970627/DOTA_devkit_YOLO)
+## License
 
-[YOLOv5_DOTA_OBB](https://github.com/hukaixuan19970627/YOLOv5_DOTA_OBB)
-
-[RotationDetection](https://github.com/yangxue0827/RotationDetection)
+This project retains the original project's licensing and attribution. See [LICENSE](LICENSE) and the attribution in the historical documentation for details.

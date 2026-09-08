@@ -1,5 +1,7 @@
 ## YOLOX-ONNXRuntime in Python
 
+> Maintained OBB export reference. This page documents raw-output/export behavior only; it does not qualify a backend or device. See the [maintainer guide](../maintainer_guide.md).
+
 This doc introduces how to convert your pytorch model into onnx, and how to run an onnxruntime demo to verify your convertion.
 
 ### Download ONNX models.
@@ -30,7 +32,7 @@ python3 tools/export_onnx.py --output-name yolox_s.onnx -n yolox-s -c yolox_s.pt
 Notes:
 * -n: specify a model name. The model name must be one of the [yolox-s,m,l,x and yolox-nane, yolox-tiny, yolov3]
 * -c: the model you have trained
-* -o: opset version, default 11. **However, if you will further convert your onnx model to [OpenVINO](https://github.com/Megvii-BaseDetection/YOLOX/demo/OpenVINO/), please specify the opset version to 10.**
+* -o: opset version, default 11. **However, if you will further convert your onnx model to [OpenVINO](openvino_py_readme.md), please specify the opset version to 10.**
 * --no-onnxsim: disable onnxsim
 * To customize a static input shape for an onnx model, modify the following code in `tools/export_onnx.py`:
 

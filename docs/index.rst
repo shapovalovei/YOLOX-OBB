@@ -1,32 +1,36 @@
+YOLOX-OBB documentation
+========================
 
-Welcome to YOLOX's documentation!
-======================================
+This documentation describes the maintained oriented-bounding-box framework. It preserves historical project material where useful, but current behavior is defined by the checked-out source and maintained local tests. Read the maintainer guide for installation, native capabilities, OBB semantics, lifecycle contracts, evaluation, export, and evidence boundaries.
 
-.. image:: ../assets/logo.png
+Maintained guides
+-----------------
 
 .. toctree::
    :maxdepth: 2
-   :caption: Quick Run
-   
+
+   maintainer_guide
    quick_run
+   train_custom_data
+   testing
    model_zoo
 
+Backend references
+------------------
+
+These pages are backend-specific or inherited examples. They are not a blanket OBB support, parity, performance, or device-qualification matrix.
+
 .. toctree::
    :maxdepth: 2
-   :caption: Tutorials
 
-   train_custom_data
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Demployment
-
-   demo/trt_py_readme
-   demo/trt_cpp_readme
-   demo/megengine_cpp_readme
-   demo/megengine_py_readme
-   demo/ncnn_android_readme
-   demo/ncnn_cpp_readme
    demo/onnx_readme
    demo/openvino_py_readme
    demo/openvino_cpp_readme
+
+Historical records
+------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   YOLOX_OBB_FINAL_FRAMEWORK_HANDOFF

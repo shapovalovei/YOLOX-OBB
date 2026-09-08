@@ -1,18 +1,19 @@
-# YOLOX-OBB final framework handoff
+# YOLOX-OBB historical framework handoff
 
-Status: final framework documentation handoff for Issue [#28](https://github.com/shapovalovei/YOLOX-OBB/issues/28).
+Status: historical framework documentation handoff for Issue [#28](https://github.com/shapovalovei/YOLOX-OBB/issues/28). It is retained for provenance and is not the current project baseline.
 
 This document records the final maintained framework contract and the
-cross-project actions that follow from it. The behavioral framework baseline
-is `0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce`, the verified `origin/main`
-revision before this documentation change. The documentation commit is
-separate and changes no framework behavior.
+cross-project actions that follow from it. The behavioral framework snapshot
+is `0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce`. The current maintained
+baseline is `a5738344fdab46aa72e1ffad4c11651f5a0184c3`; consult the
+[maintainer guide](maintainer_guide.md) for current contracts. The historical
+snapshot and this documentation commit change no framework behavior.
 
 ## Executive summary
 
-### Final baseline
+### Snapshot baseline
 
-`0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce` (`fix: correct OBB MixUp boundary geometry`, merged PR [#42](https://github.com/shapovalovei/YOLOX-OBB/pull/42)) is the final behavioral framework baseline for this handoff. It is the verified current `origin/main` revision and contains the accepted framework work covered below.
+`0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce` (`fix: correct OBB MixUp boundary geometry`, merged PR [#42](https://github.com/shapovalovei/YOLOX-OBB/pull/42)) is the behavioral snapshot for this handoff. It was superseded on the maintained branch by subsequent accepted work, including [PR #74](https://github.com/shapovalovei/YOLOX-OBB/pull/74) and [PR #79](https://github.com/shapovalovei/YOLOX-OBB/pull/79), before the current baseline recorded above.
 
 ### Audit result
 
@@ -88,10 +89,13 @@ The DOTA annotation path emits the six-field source row:
 [xmin, ymin, xmax, ymax, angle_deg, class_id]
 ```
 
-The first four values are the axis-aligned envelope encoding of an oriented
-rectangle: its center plus or minus the canonical long/short extents divided
-by two. They are not the four vertices of an axis-aligned image rectangle and
-must not be treated as polygon corners. The angle is in degrees.
+The XML field names `xmin`, `ymin`, `xmax`, and `ymax` are historical
+VOC-shaped storage names. The DOTA-to-VOC converter fits `cv2.minAreaRect`,
+canonicalizes the long and short sides, and stores `xmin = center_x - long / 2`,
+`xmax = center_x + long / 2`, `ymin = center_y - short / 2`, and
+`ymax = center_y + short / 2`, together with the angle. These values encode
+OBB center plus canonical long/short dimensions; they are not the HBB envelope
+of the rotated polygon and are not polygon corners. The angle is in degrees.
 
 After preprocessing, padded training labels use:
 
@@ -270,7 +274,7 @@ trained-model comparison was established by that framework work.
 | KLD numerical stability | [Issue #25](https://github.com/shapovalovei/YOLOX-OBB/issues/25), [Issue #33](https://github.com/shapovalovei/YOLOX-OBB/issues/33), [PR #36](https://github.com/shapovalovei/YOLOX-OBB/pull/36), `69c2c02cd5a7d8ae84bbce47834a22b973db12e5` | Valid extreme inputs could produce unstable values/gradients; hard floors/caps were considered | Log-domain arithmetic, degree-aware angles, FP32 promotion for FP16/BF16 sensitive arithmetic, and no hard gradient-killing floor/cap | Yes | No ordinary inference contract change | No raw export change | Correctness proven; quality impact unmeasured |
 | Training decode gradients | [Issue #37](https://github.com/shapovalovei/YOLOX-OBB/issues/37), [Issue #38](https://github.com/shapovalovei/YOLOX-OBB/issues/38), [PR #39](https://github.com/shapovalovei/YOLOX-OBB/pull/39), `c8d8b5611cab1b2f706a1638f53891b77b93dce0` | `exp(raw)*stride` could overflow an intermediate in backward near positive subnormal dimensions | Training uses `exp(raw + log(stride))`; eager inference and external raw decode remain literal `exp(raw)*stride` | Yes | No eager inference change | Raw ONNX contract unchanged | Correctness proven; quality impact unmeasured |
 | CUDA assignment fallback classification | [Issue #26](https://github.com/shapovalovei/YOLOX-OBB/issues/26), [Issue #40](https://github.com/shapovalovei/YOLOX-OBB/issues/40), [PR #41](https://github.com/shapovalovei/YOLOX-OBB/pull/41), `4f577cac81d7b6a796461ff6a4713c392b651d1c` | Any `RuntimeError` could trigger cache clearing and CPU retry | Only validated modern or legacy CUDA OOM signatures retry on CPU; ordinary errors propagate | No successful-assignment change | Failure semantics only | No | Correctness proven; no model-quality claim |
-| Optional MixUp geometry | [Issue #30](https://github.com/shapovalovei/YOLOX-OBB/issues/30), [PR #42](https://github.com/shapovalovei/YOLOX-OBB/pull/42), `0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce` | Cropped axis-aligned envelope could retain an angle that did not describe the visible object | Transformed corners are clipped as a visible polygon and refit to a canonical OBB | Yes only when MixUp is enabled | No | Six-field contract and compositing behavior preserved | Correctness proven; no maintained-recipe effect while MixUp is disabled |
+| Optional MixUp geometry | [Issue #30](https://github.com/shapovalovei/YOLOX-OBB/issues/30), [PR #42](https://github.com/shapovalovei/YOLOX-OBB/pull/42), `0695e2834ff5716dfd51fcd6ac7b2300b7bc27ce` | Cropped OBB storage geometry could retain an angle that did not describe the visible object | Transformed corners are clipped as a visible polygon and refit to a canonical OBB | Yes only when MixUp is enabled | No | Six-field contract and compositing behavior preserved | Correctness proven; no maintained-recipe effect while MixUp is disabled |
 | Perspective validation | [Issue #32](https://github.com/shapovalovei/YOLOX-OBB/issues/32) | Non-zero parameter selected a perspective warp without adding projective terms | Defect documented; no implementation performed | No current recipe effect | Image warp path differs, but no projective label transform exists | No API change | Defect proven; quality impact unmeasured |
 | Assignment memory/equivalence validation | [Issue #27](https://github.com/shapovalovei/YOLOX-OBB/issues/27), [Issue #44](https://github.com/shapovalovei/YOLOX-OBB/issues/44), [final T4 handoff](https://github.com/shapovalovei/YOLOX-OBB/issues/44#issuecomment-5484241937) | GPU behavior was initially inferred from CPU concerns | CPU scaling was supplemented by bounded T4 CUDA VRAM/latency/OOM and GPU/CPU equivalence validation; no framework implementation change was needed | No implementation | Bounded CUDA behavior validated; FP16 autocast limitation recorded separately | No | Assignment correctness/resource evidence; no model-quality claim |
 

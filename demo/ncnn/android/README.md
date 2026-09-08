@@ -1,5 +1,7 @@
 # YOLOX-Android-ncnn
 
+> Backend reference inherited from upstream YOLOX. It is not an OBB support or device-qualification claim. See the [maintainer guide](../../../docs/maintainer_guide.md) for current framework boundaries.
+
 Andoird app of YOLOX object detection base on [ncnn](https://github.com/Tencent/ncnn)
 
 

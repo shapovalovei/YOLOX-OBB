@@ -1,5 +1,7 @@
 # YOLOX-Python-MegEngine
 
+> Backend reference inherited from upstream YOLOX. It is not an OBB support or device-qualification claim. See the [maintainer guide](../maintainer_guide.md) for current framework boundaries.
+
 Python version of YOLOX object detection base on [MegEngine](https://github.com/MegEngine/MegEngine).
 
 ## Tutorial
