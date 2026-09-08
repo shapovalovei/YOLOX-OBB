@@ -4,25 +4,14 @@ This is the short path for the maintained YOLOX-OBB fork. For contracts and boun
 
 ## Install and verify
 
-Use an isolated environment with importable PyTorch, a compiler, Python development headers, and compatible setuptools:
+Use an isolated environment with importable PyTorch, a compiler, Python development headers, and compatible setuptools. The tracked `requirements.txt` is a broad inherited dependency list rather than a validated modern compatibility matrix; it includes old export pins such as `onnx==1.8.1`, `onnxruntime==1.8.0`, and `onnx-simplifier==0.3.5`. Exact environment compatibility is not guaranteed by that file:
 
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install -v -e . --no-build-isolation
 ```
 
-The root build includes both `yolox._C` and `DOTA_devkit_YOLO._polyiou`. Verify them before a long run:
-
-```bash
-python - <<'PY'
-from DOTA_devkit_YOLO import polyiou
-import yolox._C
-
-p = polyiou.VectorDouble([0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 2.0])
-assert abs(polyiou.iou_poly(p, p) - 1.0) < 1e-12
-print("native extensions: OK")
-PY
-```
+The root build includes both `yolox._C` and `DOTA_devkit_YOLO._polyiou`. Run the [authoritative native smoke check](testing.md#native-smoke-check) before a long run; it launches Python outside the checkout and works for either editable/source or non-editable installation.
 
 If the editable frontend fails in a current pip/setuptools environment, try the source-preserving fallback:
 
@@ -30,7 +19,7 @@ If the editable frontend fails in a current pip/setuptools environment, try the 
 python -m pip install -v . --no-build-isolation --no-deps
 ```
 
-The fallback is not a universal compatibility guarantee. The current training/evaluation import path also requires Apex.
+The fallback is not a universal compatibility guarantee. The current training/evaluation import path also requires Apex, which is not installed by `requirements.txt`.
 
 ## Run an experiment
 

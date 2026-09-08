@@ -4,14 +4,14 @@ This directory is based on [DOTA_devkit](https://github.com/CAPTAIN-WHU/DOTA_dev
 
 ## Installation
 
-Install from the repository root; do not install a nested requirements file or rely on a compiled artifact being present in Git:
+Install from the repository root; do not install a nested requirements file or rely on a compiled artifact being present in Git. The tracked `requirements.txt` is a broad inherited dependency list, not a validated modern compatibility matrix; its old export pins and exact environment compatibility remain unverified:
 
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install -v -e . --no-build-isolation
 ```
 
-This builds `DOTA_devkit_YOLO._polyiou`. Verify it with the [native smoke check](../docs/testing.md#native-smoke-check) before rotated evaluation or polygon NMS. The nested `setup.py` is retained as historical context, not the normal maintained installation path.
+This builds `DOTA_devkit_YOLO._polyiou` from `polyiou_wrap.cxx` and `polyiou.cpp`. Verify it with the [native smoke check](../docs/testing.md#native-smoke-check) before rotated evaluation or polygon NMS. The nested `setup.py` is retained as historical context, not the normal maintained installation path.
 
 ## Helper inventory
 

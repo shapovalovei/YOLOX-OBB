@@ -16,16 +16,16 @@ This guide describes the maintained YOLOX-OBB fork at the current checkout. It i
 
 ## Installation and native extensions
 
-Create an isolated environment with an importable PyTorch, a C/C++ compiler, Python development headers, and compatible setuptools. The root `setup.py` builds two extensions from checked-in sources: `yolox._C` and `DOTA_devkit_YOLO._polyiou`. `MANIFEST.in` includes the sources, so a clean Git checkout is expected to be source-only; compiled `.so` files are build outputs.
+Create an isolated environment with an importable PyTorch, a C/C++ compiler, Python development headers, and compatible setuptools. The root `setup.py` builds two extensions from checked-in sources: `yolox._C` and `DOTA_devkit_YOLO._polyiou`. `MANIFEST.in` includes the sources, so a clean Git checkout is expected to be source-only; compiled `.so` files are build outputs. The tracked `requirements.txt` is a broad inherited dependency list, not a validated modern compatibility matrix; it includes old export pins such as `onnx==1.8.1`, `onnxruntime==1.8.0`, and `onnx-simplifier==0.3.5`.
 
-Install the runtime requirements and the root package:
+If you choose to install that broad list, run it before the root package build:
 
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install -v -e . --no-build-isolation
 ```
 
-The package setup evaluates PyTorch while defining the native extensions. Make PyTorch importable before invoking the root install. SWIG is relevant to regenerating the checked-in `polyiou_wrap.cpp`, not to the normal build of that checked-in wrapper.
+The package setup evaluates PyTorch while defining the native extensions. Make PyTorch importable before invoking the root install. Core/native setup is separate from optional/backend/export dependencies, and the requirements file does not establish a supported environment matrix. SWIG is relevant to regenerating the checked-in `DOTA_devkit_YOLO/polyiou_wrap.cxx`, not to the normal build of that checked-in wrapper.
 
 On some current Python/pip/setuptools combinations, editable installation can recurse through the legacy `setup.py develop` frontend before the extension build completes. The source-preserving fallback is:
 
@@ -35,20 +35,9 @@ python -m pip install -v . --no-build-isolation --no-deps
 
 This is a compatibility fallback, not a promise that every modern environment is supported. The exact OS/Python/PyTorch/pip matrix remains unverified. A prior native-build validation covered macOS x86_64, Python 3.11.11, and PyTorch 2.2.2; it should not be generalized to other matrices.
 
-Run this smoke check immediately after installation:
+Run the [authoritative native smoke check](testing.md#native-smoke-check) immediately after either installation path. It launches Python outside the checkout, prints all imported module origins, accepts the exact intended source checkout for an editable build or the intended environment install roots for a non-editable build, and rejects unrelated origins.
 
-```bash
-python - <<'PY'
-from DOTA_devkit_YOLO import polyiou
-import yolox._C
-
-p = polyiou.VectorDouble([0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 2.0])
-assert abs(polyiou.iou_poly(p, p) - 1.0) < 1e-12
-print("native extensions: OK")
-PY
-```
-
-The current training/evaluation import path also requires `Apex`. Install or provision it separately when using those tools. `pycocotools` is needed for COCO-related evaluation paths; it does not provide the rotated OBB extension.
+The current training/evaluation import path also requires `Apex`; it is not installed by `requirements.txt`, so provision it separately when using those tools. `pycocotools` is needed for COCO-related evaluation paths; it does not provide the rotated OBB extension.
 
 The nested `DOTA_devkit_YOLO/setup.py` is a historical standalone build path. It is not the normal installation command for this repository; use the root package build so both extensions are handled together.
 
@@ -60,7 +49,7 @@ The dataset-side source annotation convention is:
 [xmin, ymin, xmax, ymax, angle_degrees, class_id]
 ```
 
-The first four values are an axis-aligned envelope used as the source annotation boundary; they are not four polygon vertices. After the training transform, labels are represented as:
+The XML field names are historical VOC storage names. The converter fits `cv2.minAreaRect`, canonicalizes the long and short sides, and stores `xmin = center_x - long_width / 2`, `xmax = center_x + long_width / 2`, `ymin = center_y - short_height / 2`, and `ymax = center_y + short_height / 2`, together with the angle. These four values encode OBB center plus canonical long/short dimensions; they are not the HBB envelope of the rotated polygon and are not polygon corners. After the training transform, labels are represented as:
 
 ```text
 [class_id, center_x, center_y, width, height, angle_degrees]
@@ -87,7 +76,7 @@ For a configuration of `max_epoch=100` and `no_aug_epochs=15`, human epochs 1–
 
 The final Mosaic epoch and the no-Aug/L1 phase are aligned with this boundary. Prefetching may hold work emitted before the boundary, so the sampler emission ordinal—not the consumer's later observation—is the contract.
 
-Checkpoints preserve the epoch-boundary schedule metadata used by the maintained resume path. Exact generic mid-epoch process resume is not guaranteed: sampler position, queued batches, worker state, and augmentation RNG state are not a complete portable checkpoint contract.
+Generic `Trainer.save_ckpt()` persists `start_epoch`, model state, optimizer state, best-metric state, and AMP state when applicable. It does not persist a complete Mosaic/DataLoader execution state such as the logical batch ordinal, `M`, cutover ordinal, `max_epoch`, `no_aug_epochs`, sampler cursor, queued batches, worker state, or augmentation RNG. On process resume, `Trainer` reconstructs the Mosaic schedule from the current `start_epoch`, current experiment values, and current `len(train_loader)` before `DataPrefetcher` construction. Exact generic mid-epoch process resume is not guaranteed.
 
 Rotated assignment uses OBB candidate geometry and dynamic-k matching. KLD prediction/target argument order is part of the API: `KLDloss.forward(pred, target)` is prediction-first, while the historical helper `compute_kld_loss(targets, preds)` is target-first. Keep degree/radian conversion and floating-point ordering intact when changing this code.
 

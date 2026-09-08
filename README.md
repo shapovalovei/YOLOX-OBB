@@ -27,7 +27,7 @@ Do not interpret downstream model or device results as generic framework guarant
 
 ## Installation and native capabilities
 
-Use a clean virtual environment with a supported compiler toolchain and an importable PyTorch installation. From the repository root:
+Use a clean virtual environment with a supported compiler toolchain and an importable PyTorch installation. The tracked `requirements.txt` is a broad inherited dependency list, not a validated modern compatibility matrix. It contains old export pins such as `onnx==1.8.1`, `onnxruntime==1.8.0`, and `onnx-simplifier==0.3.5`; exact environment compatibility is not guaranteed by that file. If you choose to use it, run from the repository root:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -39,7 +39,7 @@ The root build compiles both native extensions used by maintained paths:
 - `yolox._C` for the YOLOX native operators;
 - `DOTA_devkit_YOLO._polyiou` for rotated polygon IoU/NMS support.
 
-A clean Git checkout contains the native source files, not compiled `.so` artifacts. Build the extensions before training or evaluation and fail fast with the smoke check below rather than discovering the missing capability after a long run. SWIG is only needed when regenerating the checked-in polygon-IoU wrapper; it is not the normal first-run build requirement.
+A clean Git checkout contains the native source files, not compiled `.so` artifacts. Build the extensions before training or evaluation and fail fast with the [authoritative native smoke check](docs/testing.md#native-smoke-check) rather than discovering the missing capability after a long run. SWIG is only needed when regenerating the checked-in `DOTA_devkit_YOLO/polyiou_wrap.cxx`; it is not the normal first-run build requirement. Core native setup requires importable PyTorch, a compiler, Python development headers, and compatible setuptools independently of optional/backend/export dependencies.
 
 Some modern Python/pip/setuptools combinations do not handle this repository's editable-install frontend reliably. The source-preserving fallback is:
 
@@ -47,22 +47,9 @@ Some modern Python/pip/setuptools combinations do not handle this repository's e
 python -m pip install -v . --no-build-isolation --no-deps
 ```
 
-That fallback has not been qualified for every OS, Python, PyTorch, and pip combination. Keep the exact interpreter and package versions in the environment record.
+That fallback has not been qualified for every OS, Python, PyTorch, and pip combination. Keep the exact interpreter and package versions in the environment record. Run the same [authoritative native smoke check](docs/testing.md#native-smoke-check) after either installation path; it launches Python outside the checkout and reports the imported origins.
 
-Verify both native capabilities before dependent work:
-
-```bash
-python - <<'PY'
-from DOTA_devkit_YOLO import polyiou
-import yolox._C
-
-p = polyiou.VectorDouble([0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 2.0])
-assert abs(polyiou.iou_poly(p, p) - 1.0) < 1e-12
-print("native extensions: OK")
-PY
-```
-
-`Apex` is imported by the current training/evaluation launch path and must be available for those tools. `pycocotools` is an additional COCO-evaluation dependency, not a replacement for the OBB native extension.
+`Apex` is imported by the current training/evaluation launch path and must be available for those tools; it is not installed by `requirements.txt`. `pycocotools` is an additional COCO-evaluation dependency, not a replacement for the OBB native extension.
 
 ## Minimal OBB workflow
 

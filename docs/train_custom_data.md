@@ -17,7 +17,7 @@ VOC2012/
 └── JPEGImages-test/
 ```
 
-The annotation convention is OBB-specific. Source rows use `[xmin, ymin, xmax, ymax, angle_degrees, class_id]`; the training representation is `[class_id, center_x, center_y, width, height, angle_degrees]`. See [the maintainer guide](maintainer_guide.md) for validity and angle semantics.
+The annotation convention is OBB-specific. The XML field names `xmin`, `ymin`, `xmax`, and `ymax` are historical VOC-shaped storage names: the converter fits `cv2.minAreaRect`, canonicalizes the long and short sides, then stores `xmin = center_x - long_width / 2`, `xmax = center_x + long_width / 2`, `ymin = center_y - short_height / 2`, and `ymax = center_y + short_height / 2`, together with the angle. These values encode OBB center plus long/short dimensions; they are not an HBB envelope of the rotated polygon and are not polygon corners. Source rows therefore use `[xmin, ymin, xmax, ymax, angle_degrees, class_id]`; the training representation is `[class_id, center_x, center_y, width, height, angle_degrees]`. See [the maintainer guide](maintainer_guide.md) for validity and angle semantics.
 
 ## Convert or prepare data
 
