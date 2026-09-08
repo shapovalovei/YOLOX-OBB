@@ -11,7 +11,7 @@ python -m pip install -r requirements.txt
 python -m pip install -v -e . --no-build-isolation
 ```
 
-The root build includes both `yolox._C` and `DOTA_devkit_YOLO._polyiou`. Run the [authoritative native smoke check](testing.md#native-smoke-check) before a long run; it launches Python outside the checkout and works for either editable/source or non-editable installation.
+The root build includes both `yolox._C` and `DOTA_devkit_YOLO._polyiou`. Run the [authoritative native smoke check](testing.md#native-smoke-check) before a long run; it launches Python outside the checkout, supports either editable/source or non-editable installation, and verifies non-editable source provenance.
 
 If the editable frontend fails in a current pip/setuptools environment, try the source-preserving fallback:
 

@@ -35,7 +35,7 @@ python -m pip install -v . --no-build-isolation --no-deps
 
 This is a compatibility fallback, not a promise that every modern environment is supported. The exact OS/Python/PyTorch/pip matrix remains unverified. A prior native-build validation covered macOS x86_64, Python 3.11.11, and PyTorch 2.2.2; it should not be generalized to other matrices.
 
-Run the [authoritative native smoke check](testing.md#native-smoke-check) immediately after either installation path. It launches Python outside the checkout, prints all imported module origins, accepts the exact intended source checkout for an editable build or the intended environment install roots for a non-editable build, and rejects unrelated origins.
+Run the [authoritative native smoke check](testing.md#native-smoke-check) immediately after either installation path. It launches Python outside the checkout, prints all imported module origins, accepts the exact intended source checkout for an editable build, and for modules installed elsewhere requires `yolox` PEP 610 `direct_url.json` provenance to resolve exactly to that checkout. A site-packages path alone is not sufficient; unrelated or unprovable origins fail closed.
 
 The current training/evaluation import path also requires `Apex`; it is not installed by `requirements.txt`, so provision it separately when using those tools. `pycocotools` is needed for COCO-related evaluation paths; it does not provide the rotated OBB extension.
 

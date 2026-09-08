@@ -27,7 +27,7 @@ Passing local tests do not establish:
 
 ## Native smoke check
 
-Run this from the repository root after installation. The shell captures the intended checkout, but launches Python from a fresh temporary directory outside the checkout so the current working directory cannot shadow an installed package:
+Start this shell block in the repository root after installation. It captures the intended checkout, but launches the Python smoke itself from a fresh temporary directory outside the checkout so the current working directory cannot shadow an installed package:
 
 ```bash
 repo_root="$(pwd -P)"
@@ -36,13 +36,25 @@ trap 'rm -rf "$smoke_dir"' EXIT
 (
   cd "$smoke_dir"
   YOLOX_REPO_ROOT="$repo_root" env -u PYTHONPATH python - <<'PY'
+import json
 import os
 import sysconfig
+try:
+    from importlib import metadata
+except ImportError:
+    try:
+        import importlib_metadata as metadata
+    except ImportError as exc:
+        raise RuntimeError(
+            "cannot inspect installed YOLOX provenance: importlib.metadata is unavailable"
+        ) from exc
 from pathlib import Path
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 import yolox
 import yolox._C
-from DOTA_devkit_YOLO import polyiou
+import DOTA_devkit_YOLO.polyiou as polyiou
 import DOTA_devkit_YOLO._polyiou as polyiou_native
 
 print("yolox.__file__:", yolox.__file__)
@@ -66,18 +78,45 @@ def under(path, parent):
     except ValueError:
         return False
 
-for module, source_root in (
+modules = (
     (yolox, source_roots[0]),
     (yolox._C, source_roots[0]),
     (polyiou, source_roots[1]),
     (polyiou_native, source_roots[1]),
-):
+)
+
+installed_modules = []
+for module, source_root in modules:
     imported = Path(module.__file__).resolve()
-    if not (
-        under(imported, source_root)
-        or any(under(imported, install_root) for install_root in install_roots)
-    ):
+    if under(imported, source_root):
+        continue
+    if not any(under(imported, install_root) for install_root in install_roots):
         raise RuntimeError(f"unexpected import origin: {imported}")
+    installed_modules.append(imported)
+
+if installed_modules:
+    try:
+        distribution = metadata.distribution("yolox")
+        direct_url = distribution.read_text("direct_url.json")
+        if not direct_url:
+            raise RuntimeError("direct_url.json is missing from the yolox distribution")
+        source_url = json.loads(direct_url).get("url")
+        parsed_url = urlparse(source_url or "")
+        if parsed_url.scheme != "file" or parsed_url.netloc not in ("", "localhost"):
+            raise RuntimeError("yolox direct_url.json does not identify a local source")
+        installed_source = Path(
+            url2pathname(unquote(parsed_url.path))
+        ).resolve()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(
+            "cannot prove the installed yolox source with direct_url.json"
+        ) from exc
+    if installed_source != repo_root:
+        raise RuntimeError(
+            f"installed yolox source is {installed_source}, expected {repo_root}"
+        )
 
 p = polyiou.VectorDouble([0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 2.0])
 assert float(polyiou.iou_poly(p, p)) == 1.0
@@ -86,7 +125,7 @@ PY
 )
 ```
 
-Interpret the printed paths rather than requiring one install style: an editable/source build may legitimately resolve into the exact intended checkout, while a non-editable install should resolve into the intended environment's install roots. Any path from an unrelated checkout or package location is a failure. This catches source-tree shadowing or an incomplete native build before training/evaluation; it is not a model-quality test.
+Interpret the printed paths rather than requiring one install style: an editable/in-place build may legitimately resolve directly under the exact intended checkout. When any module resolves outside that checkout, it must be under the current interpreter's install roots and the installed `yolox` distribution's PEP 610 `direct_url.json` must identify a local source path that resolves exactly to `YOLOX_REPO_ROOT`. The smoke fails closed when that provenance metadata is missing, non-local, malformed, or points at another checkout; a site-packages path alone is not sufficient. This catches source-tree shadowing, an unrelated installation, or an incomplete native build before training/evaluation; it is not a model-quality test.
 
 ## Documentation checks
 

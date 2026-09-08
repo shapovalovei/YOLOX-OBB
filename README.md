@@ -47,7 +47,7 @@ Some modern Python/pip/setuptools combinations do not handle this repository's e
 python -m pip install -v . --no-build-isolation --no-deps
 ```
 
-That fallback has not been qualified for every OS, Python, PyTorch, and pip combination. Keep the exact interpreter and package versions in the environment record. Run the same [authoritative native smoke check](docs/testing.md#native-smoke-check) after either installation path; it launches Python outside the checkout and reports the imported origins.
+That fallback has not been qualified for every OS, Python, PyTorch, and pip combination. Keep the exact interpreter and package versions in the environment record. Run the same [authoritative native smoke check](docs/testing.md#native-smoke-check) after either installation path; it launches Python outside the checkout, reports imported origins, and verifies the source provenance of any non-editable installation.
 
 `Apex` is imported by the current training/evaluation launch path and must be available for those tools; it is not installed by `requirements.txt`. `pycocotools` is an additional COCO-evaluation dependency, not a replacement for the OBB native extension.
 
