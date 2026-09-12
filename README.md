@@ -12,19 +12,6 @@ This repository maintains generic OBB model, data, training, evaluation, and exp
 - [Local validation](docs/testing.md): maintained correctness evidence and its limits.
 - [Sphinx documentation](docs/index.rst): the navigable documentation tree.
 
-## Ownership boundaries
-
-YOLOX-OBB owns generic framework and model correctness: OBB geometry, assignment, augmentation, model heads, decode, postprocess, rotated NMS, export behavior, and regression tests.
-
-The related projects own different artifacts and integration layers:
-
-| Project | Owns |
-| --- | --- |
-| [`card-detector-training`](https://github.com/shapovalovei/card-detector-training) | datasets, recipes, training runs, checkpoints, model-quality evidence, concrete exports/quantization, and artifact provenance |
-| [`react-native-scanner-sdk`](https://github.com/shapovalovei/react-native-scanner-sdk) | mobile packaging and runtime integration, delegates, device preprocessing/decode/NMS, camera/ROI behavior, and release qualification |
-
-Do not interpret downstream model or device results as generic framework guarantees.
-
 ## Installation and native capabilities
 
 Use a clean virtual environment with a supported compiler toolchain and an importable PyTorch installation. The tracked `requirements.txt` is a broad inherited dependency list, not a validated modern compatibility matrix. It contains old export pins such as `onnx==1.8.1`, `onnxruntime==1.8.0`, and `onnx-simplifier==0.3.5`; exact environment compatibility is not guaranteed by that file. If you choose to use it, run from the repository root:
